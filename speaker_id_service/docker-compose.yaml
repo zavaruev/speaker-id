@@ -1,0 +1,31 @@
+services:
+  speaker_id:
+    build:
+      context: ./speaker_id
+      dockerfile: Dockerfile
+    container_name: speaker_id_service
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+    ports:
+      - "8001:8001"
+    environment:
+      - HF_TOKEN=0
+      - HF_HUB_VERBOSITY=error
+    volumes:
+      - ./models/speaker_id:/app/models/speaker_id
+      - ./speakers:/app/speakers
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/enroll')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
