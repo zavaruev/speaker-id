@@ -3,4 +3,4 @@ uvicorn
 numpy
 python-multipart
 pydantic
-speechbrain
+soundfile

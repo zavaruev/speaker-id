@@ -1,16 +1,18 @@
 import os
 os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
 os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
-os.environ["SB_LOG_LEVEL"] = "ERROR"
 import uuid
+import sys
+sys.path.insert(0, "/app")
 import torch
 import torchaudio
+import torchaudio.compliance.kaldi as kaldi
 import numpy as np
 import torch.nn.functional as F
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Body
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
-from speechbrain.inference.speaker import EncoderClassifier
+from campplus_model import CAMPPlus
 from pathlib import Path
 import logging
 import shutil
@@ -37,14 +39,35 @@ logger.info(f"Device: {device}")
 if device != "cpu":
     logger.info(f"GPU: {torch.cuda.get_device_name(0)}")
 
-# Загружаем модель SpeechBrain
-logger.info("Загрузка модели SpeechBrain...")
-classifier = EncoderClassifier.from_hparams(
-    source="speechbrain/spkrec-ecapa-voxceleb",
-    savedir=str(MODELS_DIR),
-    run_opts={"device": device}
-)
-logger.info("Модель успешно загружена!")
+# Загружаем модель CAM++ (WeSpeaker, VoxCeleb)
+logger.info("Загрузка модели CAMPPlus...")
+model = CAMPPlus(feat_dim=80, embed_dim=512, pooling_func="TSTP")
+ckpt_path = MODELS_DIR / "campplus_avg_model.pt"
+if not ckpt_path.exists():
+    import urllib.request
+    url = "https://huggingface.co/Wespeaker/wespeaker-voxceleb-campplus/resolve/main/avg_model.pt"
+    logger.info(f"Скачивание CAM++ с {url}")
+    urllib.request.urlretrieve(url, str(ckpt_path))
+ckpt = torch.load(str(ckpt_path), map_location=device)
+state_dict = {}
+for k, v in ckpt.items():
+    k = k.replace("module.", "")
+    if not k.startswith("projection"):
+        state_dict[k] = v
+model.load_state_dict(state_dict)
+model.to(device)
+model.eval()
+logger.info("Модель CAMPPlus успешно загружена!")
+
+def compute_fbank(signal: torch.Tensor, fs: int) -> torch.Tensor:
+    """Преобразует raw audio в 80-dim fbank для CAM++."""
+    if fs != 16000:
+        resampler = torchaudio.transforms.Resample(fs, 16000).to(signal.device)
+        signal = resampler(signal)
+        fs = 16000
+    fbank = kaldi.fbank(signal, num_mel_bins=80, frame_length=25, frame_shift=10, dither=1.0, sample_frequency=fs)
+    fbank = fbank - fbank.mean(dim=0, keepdim=True)
+    return fbank.unsqueeze(0)  # (1, num_frames, feat_dim)
 
 class IdentifyResponse(BaseModel):
     user_id: str
@@ -80,7 +103,7 @@ async def identify(file: UploadFile = File(...)):
     # Сохраняем входящий файл (сырой opus)
     with open(temp_input, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
-        
+
     try:
         # Конвертируем в WAV (SpeechBrain требует 16kHz)
         if not convert_to_wav(temp_input, temp_wav):
@@ -89,24 +112,23 @@ async def identify(file: UploadFile = File(...)):
         signal, fs = torchaudio.load(temp_wav)
         if signal.numel() == 0 or signal.shape[-1] < 4000:
             raise HTTPException(status_code=400, detail="Audio too short or empty")
-        # Fallback на CPU при ошибке GPU (cuFFT и т.п.)
-        try:
-            embeddings = classifier.encode_batch(signal.to(device))
-        except RuntimeError as e:
-            logger.warning(f"GPU error during encode, falling back to CPU: {e}")
-            torch.cuda.empty_cache()
-            classifier.to("cpu")
-            embeddings = classifier.encode_batch(signal)
-            classifier.to(device)
-        embeddings = F.normalize(embeddings, p=2, dim=-1)
+        # Нормализация громкости (пиковая)
+        peak = signal.abs().max()
+        if peak > 0:
+            signal = signal / peak * 0.9
+        # Fbank + CAM++
+        fbank = compute_fbank(signal.to(device), fs)
+        with torch.no_grad():
+            embedding = model(fbank)
+        embedding = F.normalize(embedding, p=2, dim=-1)
 
         max_score = 0.0
         best_user = "unknown"
         
         for speaker_file in SPEAKERS_DIR.glob("*.npy"):
-            enrolled_embedding = torch.tensor(np.load(speaker_file)).to(embeddings.device)
-            enrolled_embedding = F.normalize(enrolled_embedding, p=2, dim=-1)
-            score = F.cosine_similarity(embeddings.squeeze(), enrolled_embedding.squeeze(), dim=0).item()
+            enrolled = torch.tensor(np.load(speaker_file)).to(device)
+            enrolled = F.normalize(enrolled, p=2, dim=-1)
+            score = F.cosine_similarity(embedding.squeeze(), enrolled.squeeze(), dim=0).item()
             if score > max_score:
                 max_score = score
                 best_user = speaker_file.stem
@@ -668,6 +690,7 @@ async function startRecording(index) {
     processor.connect(ctx.destination);
 
     audioChunks = [];
+    recordingSampleRate = ctx.sampleRate;
     recordingContext = ctx;
     recordingSource = source;
     recordingScriptProcessor = processor;
@@ -713,7 +736,8 @@ function stopRecording(index) {
 
   try {
     if (audioChunks.length > 0) {
-      const blob = encodeWAV(audioChunks);
+      const sr = recordingSampleRate || 16000;
+      const blob = encodeWAV(sr, audioChunks);
       const audio = document.getElementById('audio-' + index);
       audio.src = URL.createObjectURL(blob);
       audio.style.display = 'block';
@@ -792,8 +816,8 @@ async function submitEnroll() {
   }
 }
 
-function encodeWAV(chunks) {
-  const sr = 16000, ch = 1, bps = 2, ba = ch * bps;
+function encodeWAV(sr, chunks) {
+  const ch = 1, bps = 2, ba = ch * bps;
   let size = 0;
   chunks.forEach(c => size += c.byteLength);
   const buf = new ArrayBuffer(44 + size);
@@ -835,23 +859,21 @@ async def enroll(user_id: str = Form(...), files: list[UploadFile] = File(...)):
             
             with open(temp_input, "wb") as buffer:
                 shutil.copyfileobj(file.file, buffer)
-                
+
             if not convert_to_wav(temp_input, temp_wav):
                 raise HTTPException(status_code=500, detail="Failed to process audio format")
 
             signal, fs = torchaudio.load(temp_wav)
             if signal.numel() == 0 or signal.shape[-1] < 4000:
                 raise HTTPException(status_code=400, detail="Audio too short or empty")
-            try:
-                embeddings = classifier.encode_batch(signal.to(device))
-            except RuntimeError as e:
-                logger.warning(f"GPU error during enroll encode, falling back to CPU: {e}")
-                torch.cuda.empty_cache()
-                classifier.to("cpu")
-                embeddings = classifier.encode_batch(signal)
-                classifier.to(device)
-            embeddings = F.normalize(embeddings, p=2, dim=-1)
-            embeddings_list.append(embeddings.squeeze().cpu())
+            peak = signal.abs().max()
+            if peak > 0:
+                signal = signal / peak * 0.9
+            fbank = compute_fbank(signal.to(device), fs)
+            with torch.no_grad():
+                embedding = model(fbank)
+            embedding = F.normalize(embedding, p=2, dim=-1)
+            embeddings_list.append(embedding.squeeze().cpu())
 
         avg_embeddings = torch.stack(embeddings_list).mean(dim=0)
         np.save(SPEAKERS_DIR / f"{user_id}.npy", avg_embeddings.numpy())

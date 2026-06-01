@@ -11,11 +11,7 @@ WORKDIR /app
 RUN pip install --no-cache-dir torch torchaudio --index-url https://download.pytorch.org/whl/cu118
 
 COPY requirements.txt .
-RUN apt-get update && apt-get install -y --no-install-recommends gcc g++ \
-    && pip install --no-cache-dir -r requirements.txt \
-    && apt-get purge -y gcc g++ \
-    && apt-get autoremove -y \
-    && rm -rf /var/lib/apt/lists/*
+RUN pip install --no-cache-dir -r requirements.txt
 
 RUN mkdir -p /app/models/speaker_id /app/speakers
 
