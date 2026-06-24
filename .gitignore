@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+.env
+speaker_id_service/models/
+spedata-er_id_service/speakers/
