@@ -11,6 +11,7 @@ import numpy as np
 import torch.nn.functional as F
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Body
 from fastapi.responses import HTMLResponse
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 from campplus_model import CAMPPlus
 from pathlib import Path
@@ -102,7 +103,7 @@ async def identify(file: UploadFile = File(...)):
     
     # Сохраняем входящий файл (сырой opus)
     with open(temp_input, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+        await run_in_threadpool(shutil.copyfileobj, file.file, buffer)
 
     try:
         # Конвертируем в WAV (SpeechBrain требует 16kHz)
@@ -858,7 +859,7 @@ async def enroll(user_id: str = Form(...), files: list[UploadFile] = File(...)):
             temp_files.extend([temp_input, temp_wav])
             
             with open(temp_input, "wb") as buffer:
-                shutil.copyfileobj(file.file, buffer)
+                await run_in_threadpool(shutil.copyfileobj, file.file, buffer)
 
             if not convert_to_wav(temp_input, temp_wav):
                 raise HTTPException(status_code=500, detail="Failed to process audio format")
