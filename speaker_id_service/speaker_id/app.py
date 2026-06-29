@@ -81,9 +81,9 @@ def convert_to_wav(input_path: str, output_path: str) -> bool:
     """Конвертирует любое аудио в 16000Hz Mono WAV через FFmpeg."""
     try:
         subprocess.run([
-            'ffmpeg', '-y', '-i', input_path,
-            '-ar', '16000', '-ac', '1', output_path
-        ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            'ffmpeg', '-y', '-i', str(input_path),
+            '-ar', '16000', '-ac', '1', str(output_path)
+        ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, shell=False)
         return True
     except FileNotFoundError:
         logger.error("❌ FFmpeg не установлен в контейнере! Выполни: apt-get install ffmpeg")
@@ -97,7 +97,8 @@ async def identify(file: UploadFile = File(...)):
     """Распознавание спикера из аудиофайла."""
     # Используем UUID, чтобы файлы не перезаписывали друг друга при параллельных запросах
     req_id = str(uuid.uuid4())
-    temp_input = f"/tmp/{req_id}_{file.filename}"
+    safe_filename = Path(file.filename).name if file.filename else "upload.raw"
+    temp_input = f"/tmp/{req_id}_{safe_filename}"
     temp_wav = f"/tmp/{req_id}_processed.wav"
     
     # Сохраняем входящий файл (сырой opus)
@@ -853,7 +854,8 @@ async def enroll(user_id: str = Form(...), files: list[UploadFile] = File(...)):
     try:
         for file in files:
             req_id = str(uuid.uuid4())
-            temp_input = f"/tmp/{req_id}_{file.filename}"
+            safe_filename = Path(file.filename).name if file.filename else "upload.raw"
+            temp_input = f"/tmp/{req_id}_{safe_filename}"
             temp_wav = f"/tmp/{req_id}_processed.wav"
             temp_files.extend([temp_input, temp_wav])
             
