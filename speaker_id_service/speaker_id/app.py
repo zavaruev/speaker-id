@@ -4,6 +4,7 @@ os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
 import uuid
 import sys
 sys.path.insert(0, "/app")
+import asyncio
 import torch
 import torchaudio
 import torchaudio.compliance.kaldi as kaldi
@@ -77,19 +78,25 @@ class EnrollResponse(BaseModel):
     status: str
     user_id: str
 
-def convert_to_wav(input_path: str, output_path: str) -> bool:
-    """Конвертирует любое аудио в 16000Hz Mono WAV через FFmpeg."""
+async def convert_to_wav(input_path: str, output_path: str) -> bool:
+    """Конвертирует любое аудио в 16000Hz Mono WAV через FFmpeg (асинхронно)."""
     try:
-        subprocess.run([
+        process = await asyncio.create_subprocess_exec(
             'ffmpeg', '-y', '-i', input_path,
-            '-ar', '16000', '-ac', '1', output_path
-        ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            '-ar', '16000', '-ac', '1', output_path,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL
+        )
+        returncode = await process.wait()
+        if returncode != 0:
+            logger.error(f"❌ Ошибка FFmpeg при конвертации, код возврата: {returncode}")
+            return False
         return True
     except FileNotFoundError:
         logger.error("❌ FFmpeg не установлен в контейнере! Выполни: apt-get install ffmpeg")
         return False
-    except subprocess.CalledProcessError as e:
-        logger.error(f"❌ Ошибка FFmpeg при конвертации: {e}")
+    except Exception as e:
+        logger.error(f"❌ Ошибка при конвертации: {e}")
         return False
 
 @app.post("/identify", response_model=IdentifyResponse)
@@ -106,7 +113,7 @@ async def identify(file: UploadFile = File(...)):
 
     try:
         # Конвертируем в WAV (SpeechBrain требует 16kHz)
-        if not convert_to_wav(temp_input, temp_wav):
+        if not await convert_to_wav(temp_input, temp_wav):
             raise HTTPException(status_code=500, detail="Failed to process audio format")
 
         signal, fs = torchaudio.load(temp_wav)
@@ -860,7 +867,7 @@ async def enroll(user_id: str = Form(...), files: list[UploadFile] = File(...)):
             with open(temp_input, "wb") as buffer:
                 shutil.copyfileobj(file.file, buffer)
 
-            if not convert_to_wav(temp_input, temp_wav):
+            if not await convert_to_wav(temp_input, temp_wav):
                 raise HTTPException(status_code=500, detail="Failed to process audio format")
 
             signal, fs = torchaudio.load(temp_wav)
