@@ -97,7 +97,7 @@ async def identify(file: UploadFile = File(...)):
     """Распознавание спикера из аудиофайла."""
     # Используем UUID, чтобы файлы не перезаписывали друг друга при параллельных запросах
     req_id = str(uuid.uuid4())
-    temp_input = f"/tmp/{req_id}_{file.filename}"
+    temp_input = f"/tmp/{req_id}_{os.path.basename(file.filename)}"
     temp_wav = f"/tmp/{req_id}_processed.wav"
     
     # Сохраняем входящий файл (сырой opus)
@@ -853,7 +853,7 @@ async def enroll(user_id: str = Form(...), files: list[UploadFile] = File(...)):
     try:
         for file in files:
             req_id = str(uuid.uuid4())
-            temp_input = f"/tmp/{req_id}_{file.filename}"
+            temp_input = f"/tmp/{req_id}_{os.path.basename(file.filename)}"
             temp_wav = f"/tmp/{req_id}_processed.wav"
             temp_files.extend([temp_input, temp_wav])
             
