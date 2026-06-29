@@ -9,7 +9,7 @@ import torchaudio
 import torchaudio.compliance.kaldi as kaldi
 import numpy as np
 import torch.nn.functional as F
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Body
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from campplus_model import CAMPPlus
