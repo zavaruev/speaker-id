@@ -95,9 +95,13 @@ def convert_to_wav(input_path: str, output_path: str) -> bool:
 @app.post("/identify", response_model=IdentifyResponse)
 async def identify(file: UploadFile = File(...)):
     """Распознавание спикера из аудиофайла."""
+    safe_filename = os.path.basename(file.filename)
+    if not safe_filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+
     # Используем UUID, чтобы файлы не перезаписывали друг друга при параллельных запросах
     req_id = str(uuid.uuid4())
-    temp_input = f"/tmp/{req_id}_{file.filename}"
+    temp_input = f"/tmp/{req_id}_{safe_filename}"
     temp_wav = f"/tmp/{req_id}_processed.wav"
     
     # Сохраняем входящий файл (сырой opus)
@@ -844,6 +848,10 @@ addSample();
 @app.post("/enroll", response_model=EnrollResponse)
 async def enroll(user_id: str = Form(...), files: list[UploadFile] = File(...)):
     """Регистрация нового голоса (создание слепка .npy)"""
+    safe_user_id = os.path.basename(user_id)
+    if not safe_user_id or safe_user_id == "." or safe_user_id == "..":
+        raise HTTPException(status_code=400, detail="Invalid user_id")
+
     if not files:
         raise HTTPException(status_code=400, detail="At least one audio file is required")
     
@@ -852,8 +860,12 @@ async def enroll(user_id: str = Form(...), files: list[UploadFile] = File(...)):
     
     try:
         for file in files:
+            safe_filename = os.path.basename(file.filename)
+            if not safe_filename:
+                raise HTTPException(status_code=400, detail="Invalid filename")
+
             req_id = str(uuid.uuid4())
-            temp_input = f"/tmp/{req_id}_{file.filename}"
+            temp_input = f"/tmp/{req_id}_{safe_filename}"
             temp_wav = f"/tmp/{req_id}_processed.wav"
             temp_files.extend([temp_input, temp_wav])
             
@@ -876,9 +888,9 @@ async def enroll(user_id: str = Form(...), files: list[UploadFile] = File(...)):
             embeddings_list.append(embedding.squeeze().cpu())
 
         avg_embeddings = torch.stack(embeddings_list).mean(dim=0)
-        np.save(SPEAKERS_DIR / f"{user_id}.npy", avg_embeddings.numpy())
-        logger.info(f"Голос зарегистрирован: {user_id} ({len(files)} сэмплов)")
-        return EnrollResponse(status="success", user_id=user_id)
+        np.save(SPEAKERS_DIR / f"{safe_user_id}.npy", avg_embeddings.numpy())
+        logger.info(f"Голос зарегистрирован: {safe_user_id} ({len(files)} сэмплов)")
+        return EnrollResponse(status="success", user_id=safe_user_id)
         
     finally:
         for temp_file in temp_files:
