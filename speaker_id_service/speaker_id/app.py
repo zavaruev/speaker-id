@@ -12,6 +12,7 @@ import numpy as np
 import torch.nn.functional as F
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.responses import HTMLResponse
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 from campplus_model import CAMPPlus
 from pathlib import Path
@@ -136,7 +137,7 @@ async def identify(file: UploadFile = File(...)):
     temp_wav = f"/tmp/{req_id}_processed.wav"
     
     with open(temp_input, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
+        await run_in_threadpool(shutil.copyfileobj, file.file, buffer)
 
     try:
         if os.path.getsize(temp_input) > MAX_FILE_SIZE:
@@ -930,7 +931,7 @@ async def enroll(user_id: str = Form(...), files: list[UploadFile] = File(...)):
             temp_files.extend([temp_input, temp_wav])
             
             with open(temp_input, "wb") as buffer:
-                shutil.copyfileobj(file.file, buffer)
+                await run_in_threadpool(shutil.copyfileobj, file.file, buffer)
 
             if os.path.getsize(temp_input) > MAX_FILE_SIZE:
                 raise HTTPException(status_code=413, detail=f"File exceeds {MAX_FILE_SIZE // (1024*1024)}MB limit")
