@@ -39,10 +39,10 @@ Server runs on **http://localhost:8001**.
 Open **http://localhost:8001/enroll** in any modern browser (Chrome, Safari, Firefox).
 
 1. Enter a username (e.g. `alexander`)
-2. Click **Записать** (Record) — read the shown text for ~5 seconds
-3. Click **Стоп** (Stop) — review the recording
+2. Click **Record** — read the shown text for ~5 seconds
+3. Click **Stop** — review the recording
 4. Repeat for 3 samples
-5. Click **Зарегистрировать голос** (Register Voice)
+5. Click **Register Voice**
 
 Three samples are averaged into one `.npy` embedding file.
 
