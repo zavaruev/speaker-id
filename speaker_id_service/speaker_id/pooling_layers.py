@@ -261,8 +261,6 @@ class MHASTP(torch.nn.Module):
         chunks = torch.chunk(input, self.head_num, 1)
         # split
         chunks_out = []
-        # for i in range(self.head_num):
-        #     att_score = self.heads_att_trans[i](chunks[i])
         for i, layer in enumerate(self.heads_att_trans):
             att_score = layer(chunks[i])
             alpha = F.softmax(att_score, dim=-1)
