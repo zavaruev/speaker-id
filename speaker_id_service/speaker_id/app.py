@@ -9,7 +9,7 @@ import torchaudio
 import torchaudio.compliance.kaldi as kaldi
 import numpy as np
 import torch.nn.functional as F
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Body
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from campplus_model import CAMPPlus
@@ -18,8 +18,10 @@ import logging
 import shutil
 import uvicorn
 import subprocess
+import asyncio
+import threading
 
-# Инициализация и логирование
+# Setup and logging
 logging.basicConfig(level=logging.INFO)
 for _logger in ["httpx", "urllib3", "filelock"]:
     logging.getLogger(_logger).setLevel(logging.ERROR)
@@ -32,23 +34,23 @@ MODELS_DIR = Path("/app/models/speaker_id")
 SPEAKERS_DIR.mkdir(parents=True, exist_ok=True)
 MODELS_DIR.mkdir(parents=True, exist_ok=True)
 
-# Проверка CUDA для GPU (P104-100)
+# CUDA check for GPU (P104-100)
 device = "cuda:0" if torch.cuda.is_available() else "cpu"
 logger.info(f"--- Speaker ID Service ---")
 logger.info(f"Device: {device}")
 if device != "cpu":
     logger.info(f"GPU: {torch.cuda.get_device_name(0)}")
 
-# Загружаем модель CAM++ (WeSpeaker, VoxCeleb)
-logger.info("Загрузка модели CAMPPlus...")
+# Load CAM++ model (WeSpeaker, VoxCeleb)
+logger.info("Loading CAMPPlus model...")
 model = CAMPPlus(feat_dim=80, embed_dim=512, pooling_func="TSTP")
 ckpt_path = MODELS_DIR / "campplus_avg_model.pt"
 if not ckpt_path.exists():
     import urllib.request
     url = "https://huggingface.co/Wespeaker/wespeaker-voxceleb-campplus/resolve/main/avg_model.pt"
-    logger.info(f"Скачивание CAM++ с {url}")
+    logger.info(f"Downloading CAM++ from {url}")
     urllib.request.urlretrieve(url, str(ckpt_path))
-ckpt = torch.load(str(ckpt_path), map_location=device)
+ckpt = torch.load(str(ckpt_path), map_location=device, weights_only=True)
 state_dict = {}
 for k, v in ckpt.items():
     k = k.replace("module.", "")
@@ -57,13 +59,30 @@ for k, v in ckpt.items():
 model.load_state_dict(state_dict)
 model.to(device)
 model.eval()
-logger.info("Модель CAMPPlus успешно загружена!")
+logger.info("CAMPPlus model successfully loaded!")
+
+# Warm-up: run dummy inference to compile CUDA kernels
+with torch.no_grad():
+    dummy = torch.randn(1, 100, 80).to(device)
+    _ = model(dummy)
+logger.info("Model warm-up done")
+_model_ready = True
+
+MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB limit
+
+# Embedding cache for batched cosine similarity
+_embedding_names: list[str] = []
+_embedding_matrix: torch.Tensor | None = None
+_cache_lock = threading.Lock()
+# Pre-create resampler to avoid re-initialization per request
+_resampler_16k = torchaudio.transforms.Resample(orig_freq=16000, new_freq=16000).to(device)
 
 def compute_fbank(signal: torch.Tensor, fs: int) -> torch.Tensor:
-    """Преобразует raw audio в 80-dim fbank для CAM++."""
     if fs != 16000:
-        resampler = torchaudio.transforms.Resample(fs, 16000).to(signal.device)
-        signal = resampler(signal)
+        global _resampler_16k
+        if _resampler_16k.orig_freq != fs or _resampler_16k.new_freq != 16000:
+            _resampler_16k = torchaudio.transforms.Resample(fs, 16000).to(signal.device)
+        signal = _resampler_16k(signal)
         fs = 16000
     fbank = kaldi.fbank(signal, num_mel_bins=80, frame_length=25, frame_shift=10, dither=1.0, sample_frequency=fs)
     fbank = fbank - fbank.mean(dim=0, keepdim=True)
@@ -78,71 +97,99 @@ class EnrollResponse(BaseModel):
     user_id: str
 
 def convert_to_wav(input_path: str, output_path: str) -> bool:
-    """Конвертирует любое аудио в 16000Hz Mono WAV через FFmpeg."""
+    """Convert any audio to 16000Hz Mono WAV via FFmpeg."""
     try:
         subprocess.run([
-            'ffmpeg', '-y', '-i', input_path,
-            '-ar', '16000', '-ac', '1', output_path
-        ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            'ffmpeg', '-y', '-i', str(input_path),
+            '-ar', '16000', '-ac', '1', str(output_path)
+        ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, shell=False)
         return True
     except FileNotFoundError:
-        logger.error("❌ FFmpeg не установлен в контейнере! Выполни: apt-get install ffmpeg")
+        logger.error("FFmpeg not installed in container! Run: apt-get install ffmpeg")
         return False
     except subprocess.CalledProcessError as e:
-        logger.error(f"❌ Ошибка FFmpeg при конвертации: {e}")
+        logger.error(f"FFmpeg conversion error: {e}")
         return False
+
+def _rebuild_cache():
+    global _embedding_names, _embedding_matrix
+    names = []
+    tensors = []
+    for speaker_file in sorted(SPEAKERS_DIR.glob("*.npy")):
+        try:
+            t = torch.tensor(np.load(speaker_file), device=device)
+            t = F.normalize(t, p=2, dim=-1)
+            names.append(speaker_file.stem)
+            tensors.append(t)
+        except Exception as e:
+            logger.warning(f"Skipping corrupted {speaker_file.name}: {e}")
+    with _cache_lock:
+        _embedding_names = names
+        _embedding_matrix = torch.stack(tensors) if tensors else None
 
 @app.post("/identify", response_model=IdentifyResponse)
 async def identify(file: UploadFile = File(...)):
-    """Распознавание спикера из аудиофайла."""
-    # Используем UUID, чтобы файлы не перезаписывали друг друга при параллельных запросах
     req_id = str(uuid.uuid4())
-    filename = os.path.basename(file.filename) if file.filename else "upload"
-    temp_input = f"/tmp/{req_id}_{filename}"
+    safe_filename = Path(file.filename).name if file.filename else "upload.raw"
+    temp_input = f"/tmp/{req_id}_{safe_filename}"
     temp_wav = f"/tmp/{req_id}_processed.wav"
     
-    # Сохраняем входящий файл (сырой opus)
     with open(temp_input, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 
     try:
-        # Конвертируем в WAV (SpeechBrain требует 16kHz)
+        if os.path.getsize(temp_input) > MAX_FILE_SIZE:
+            raise HTTPException(status_code=413, detail=f"File exceeds {MAX_FILE_SIZE // (1024*1024)}MB limit")
         if not convert_to_wav(temp_input, temp_wav):
             raise HTTPException(status_code=500, detail="Failed to process audio format")
 
         signal, fs = torchaudio.load(temp_wav)
         if signal.numel() == 0 or signal.shape[-1] < 4000:
             raise HTTPException(status_code=400, detail="Audio too short or empty")
-        # Нормализация громкости (пиковая)
         peak = signal.abs().max()
         if peak > 0:
             signal = signal / peak * 0.9
-        # Fbank + CAM++
         fbank = compute_fbank(signal.to(device), fs)
         with torch.no_grad():
-            embedding = model(fbank)
+            try:
+                embedding = model(fbank)
+            except RuntimeError as e:
+                logger.warning(f"GPU inference failed, falling back to CPU: {e}")
+                fbank_cpu = fbank.cpu()
+                model_cpu = model.cpu()
+                with torch.no_grad():
+                    embedding = model_cpu(fbank_cpu)
+                model.to(device)
+                embedding = embedding.to(device)
         embedding = F.normalize(embedding, p=2, dim=-1)
 
-        max_score = 0.0
-        best_user = "unknown"
+        # Batched cosine similarity against all enrolled speakers
+        with _cache_lock:
+            names = _embedding_names
+            matrix = _embedding_matrix
         
-        for speaker_file in SPEAKERS_DIR.glob("*.npy"):
-            enrolled = torch.tensor(np.load(speaker_file)).to(device)
-            enrolled = F.normalize(enrolled, p=2, dim=-1)
-            score = F.cosine_similarity(embedding.squeeze(), enrolled.squeeze(), dim=0).item()
-            if score > max_score:
-                max_score = score
-                best_user = speaker_file.stem
+        if matrix is None:
+            _rebuild_cache()
+            with _cache_lock:
+                names = _embedding_names
+                matrix = _embedding_matrix
         
-        # Проверка порога точности
+        if matrix is not None:
+            scores = (embedding.squeeze(0) @ matrix.T).cpu().numpy()
+            max_idx = scores.argmax()
+            max_score = float(scores[max_idx])
+            best_user = names[max_idx]
+        else:
+            max_score = 0.0
+            best_user = "unknown"
+        
         if max_score < 0.4:
             best_user = "unknown"
             
-        logger.info(f"Распознан: {best_user} (Точность: {max_score:.2f})")
+        logger.info(f"Identified: {best_user} (Confidence: {max_score:.2f})")
         return IdentifyResponse(user_id=best_user, confidence=max_score)
         
     finally:
-        # Надежная очистка временных файлов
         if os.path.exists(temp_input):
             os.remove(temp_input)
         if os.path.exists(temp_wav):
@@ -151,12 +198,12 @@ async def identify(file: UploadFile = File(...)):
 @app.get("/enroll", response_class=HTMLResponse)
 async def enroll_form():
     html = """<!DOCTYPE html>
-<html lang="ru">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Голосовая регистрация | Speaker ID</title>
-<meta name="description" content="Регистрация голосового профиля для системы распознавания спикеров">
+<title>Voice Enrollment | Speaker ID</title>
+<meta name="description" content="Enroll your voice profile for speaker identification">
 <style>
 :root {
   --c-canvas: #ffffff;
@@ -164,6 +211,7 @@ async def enroll_form():
   --c-ink: #1d1d1f;
   --c-ink-secondary: #7a7a7a;
   --c-primary: #0066cc;
+  --c-primary-rgb: 0, 102, 204;
   --c-primary-hover: #0071e3;
   --c-primary-on-dark: #2997ff;
   --c-on-primary: #ffffff;
@@ -171,9 +219,13 @@ async def enroll_form():
   --c-divider: #f0f0f0;
   --c-surface-pearl: #fafafc;
   --c-success: #34d34d;
+  --c-success-rgb: 52, 211, 77;
   --c-error: #ff3b30;
+  --c-error-rgb: 255, 59, 48;
   --c-warning: #ff9f0a;
+  --c-warning-rgb: 255, 159, 10;
   --c-red-action: #ff3b30;
+  --c-red-action-rgb: 255, 59, 48;
   --c-success-bg: #e8f8ee;
   --c-error-bg: #ffeeed;
   --t-display: 34px/1.47 -0.374px;
@@ -199,15 +251,20 @@ async def enroll_form():
   --c-ink: #ffffff;
   --c-ink-secondary: #98989d;
   --c-primary: #2997ff;
+  --c-primary-rgb: 41, 151, 255;
   --c-primary-hover: #40a9ff;
   --c-on-primary: #ffffff;
   --c-hairline: #3a3a3c;
   --c-divider: #3a3a3c;
   --c-surface-pearl: #333336;
   --c-success: #30d158;
+  --c-success-rgb: 48, 209, 88;
   --c-error: #ff453a;
+  --c-error-rgb: 255, 69, 58;
   --c-warning: #ffd60a;
+  --c-warning-rgb: 255, 214, 10;
   --c-red-action: #ff453a;
+  --c-red-action-rgb: 255, 69, 58;
   --c-success-bg: #1a3a2a;
   --c-error-bg: #3a1a1a;
 }
@@ -335,7 +392,7 @@ input[type="text"] {
 }
 input[type="text"]:focus {
   border-color: var(--c-primary);
-  box-shadow: 0 0 0 3px rgb(from var(--c-primary) r g b / 0.15);
+  box-shadow: 0 0 0 3px rgba(var(--c-primary-rgb), 0.15);
 }
 input[type="text"]::placeholder {
   color: var(--c-ink-secondary);
@@ -458,7 +515,7 @@ input[type="text"]::placeholder {
   gap: var(--s-xs);
   margin-top: var(--s-xs);
   padding: var(--s-xs) var(--s-sm);
-  background: rgb(from var(--c-warning) r g b / 0.12);
+  background: rgba(var(--c-warning-rgb), 0.12);
   border-radius: var(--r-pill);
   width: fit-content;
 }
@@ -508,7 +565,7 @@ audio::-webkit-media-controls-panel {
   transition: background 0.2s, color 0.2s;
 }
 .btn-add:hover:not(:disabled) {
-  background: rgb(from var(--c-primary) r g b / 0.08);
+  background: rgba(var(--c-primary-rgb), 0.08);
 }
 .btn-add:disabled {
   opacity: 0.4;
@@ -547,13 +604,13 @@ audio::-webkit-media-controls-panel {
   display: block;
   background: var(--c-success-bg);
   color: var(--c-success);
-  border: 1px solid rgb(from var(--c-success) r g b / 0.3);
+  border: 1px solid rgba(var(--c-success-rgb), 0.3);
 }
 .status-message.error {
   display: block;
   background: var(--c-error-bg);
   color: var(--c-error);
-  border: 1px solid rgb(from var(--c-error) r g b / 0.3);
+  border: 1px solid rgba(var(--c-error-rgb), 0.3);
 }
 
 @media (max-width: 640px) {
@@ -571,7 +628,7 @@ audio::-webkit-media-controls-panel {
 </style>
 </head>
 <body>
-<button class="theme-toggle" id="theme-toggle" onclick="toggleTheme()" aria-label="Переключить тему">🌙</button>
+<button class="theme-toggle" id="theme-toggle" onclick="toggleTheme()" aria-label="Toggle theme">🌙</button>
 
 <div class="container">
   <div class="header">
@@ -581,8 +638,8 @@ audio::-webkit-media-controls-panel {
         <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
       </svg>
     </div>
-    <h1>Голосовая регистрация</h1>
-    <p class="subtitle">Запишите 3 сэмпла речи для создания голосового профиля</p>
+    <h1>Voice Enrollment</h1>
+    <p class="subtitle">Record 3 speech samples to create your voice profile</p>
   </div>
 
   <div class="progress" id="progress-container">
@@ -592,19 +649,19 @@ audio::-webkit-media-controls-panel {
   </div>
 
   <div class="form-group">
-    <label for="user_id">Имя пользователя</label>
-    <input type="text" id="user_id" placeholder="например: alexander" value="">
+    <label for="user_id">Username</label>
+    <input type="text" id="user_id" placeholder="e.g. alexander" value="">
   </div>
 
   <div class="samples-container" id="samples-container"></div>
 
-  <button class="btn-add" id="add-sample-btn" onclick="addSample()">+ Добавить сэмпл</button>
+  <button class="btn-add" id="add-sample-btn" onclick="addSample()">+ Add sample</button>
 
   <button class="btn-submit" id="submit-btn" onclick="submitEnroll()" disabled>
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle">
       <path d="M20 6L9 17l-5-5"/>
     </svg>
-    Зарегистрировать голос
+    Register Voice
   </button>
 
   <div id="status" class="status-message"></div>
@@ -612,9 +669,9 @@ audio::-webkit-media-controls-panel {
 
 <script>
 const TEXTS = [
-  "Привет, компьютер! Я настраиваю свой голосовой профиль для системы умного дома. Этот образец звука поможет нейросети запомнить мой голос.",
-  "Сегодня отличная погода, за окном светит солнце и поют птицы. Надеюсь, система распознает мой голос без ошибок даже в шумной комнате.",
-  "Раз, два, три, четыре, пять, шесть, семь, восемь, девять, десять. Я говорю с разной интонацией, чтобы сэмпл получился максимально полным и качественным."
+  "Hello, computer! I am setting up my voice profile for the smart home system. This audio sample will help the neural network remember my voice.",
+  "The weather is great today, the sun is shining and the birds are singing outside. I hope the system recognizes my voice without errors even in a noisy room.",
+  "One, two, three, four, five, six, seven, eight, nine, ten. I am speaking with different intonation to make the sample as complete and high-quality as possible."
 ];
 
 const themeToggle = document.getElementById('theme-toggle');
@@ -641,10 +698,13 @@ let samples = [];
 let audioChunks = [];
 let recordingTimer;
 let recordingDuration = 0;
+let recordingStartTime = 0;
 let recordingContext;
 let recordingSource;
 let recordingScriptProcessor;
 let recording = false;
+let recordingSampleRate = 16000;
+let mediaStream = null;
 
 function addSample() {
   const index = samples.length;
@@ -655,18 +715,18 @@ function addSample() {
   d.innerHTML = `
     <div class="sample-header">
       <span class="sample-num">${index + 1}</span>
-      <h3>Сэмпл ${index + 1} из 3</h3>
-      <button class="btn btn-remove remove-btn" onclick="removeSample(${index})" style="display:none">Удалить</button>
+      <h3>Sample ${index + 1} of 3</h3>
+      <button class="btn btn-remove remove-btn" onclick="removeSample(${index})" style="display:none">Remove</button>
     </div>
     <div class="text-box"><p>${TEXTS[index]}</p></div>
     <div class="sample-actions">
-      <button class="btn btn-record" onclick="startRecording(${index})">● Записать</button>
-      <button class="btn btn-stop" onclick="stopRecording(${index})" disabled>■ Стоп</button>
+      <button class="btn btn-record" onclick="startRecording(${index})">● Record</button>
+      <button class="btn btn-stop" onclick="stopRecording(${index})" disabled>■ Stop</button>
     </div>
     <div class="recording-indicator" id="recording-${index}">
       <span class="dot"></span>
       <span class="timer" id="timer-${index}">00:00</span>
-      <span class="label">Идёт запись…</span>
+      <span class="label">Recording…</span>
     </div>
     <audio id="audio-${index}" controls style="display:none"></audio>
   `;
@@ -677,10 +737,11 @@ function addSample() {
 async function startRecording(index) {
   try {
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      showStatus('Ошибка: микрофон недоступен в этом браузере', 'error');
+      showStatus('Error: microphone not available in this browser', 'error');
       return;
     }
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    mediaStream = stream;
     const AC = window.AudioContext || window.webkitAudioContext;
     const ctx = new AC();
     if (ctx.state === 'suspended') await ctx.resume();
@@ -708,7 +769,7 @@ async function startRecording(index) {
     };
 
     recording = true;
-    recordingDuration = 0;
+    recordingStartTime = Date.now();
     const timerEl = document.getElementById('timer-' + index);
 
     const btns = document.querySelectorAll('#samples-container .sample')[index].querySelectorAll('.sample-actions button');
@@ -718,13 +779,17 @@ async function startRecording(index) {
     document.getElementById('recording-' + index).classList.add('active');
 
     recordingTimer = setInterval(() => {
-      recordingDuration++;
-      const m = String(Math.floor(recordingDuration / 60)).padStart(2, '0');
-      const s = String(recordingDuration % 60).padStart(2, '0');
+      const elapsed = Math.floor((Date.now() - recordingStartTime) / 1000);
+      const m = String(Math.floor(elapsed / 60)).padStart(2, '0');
+      const s = String(elapsed % 60).padStart(2, '0');
       timerEl.textContent = m + ':' + s;
-    }, 1000);
+    }, 200);
   } catch (err) {
-    showStatus('Ошибка доступа к микрофону: ' + err.message, 'error');
+    if (mediaStream) {
+      mediaStream.getTracks().forEach(t => t.stop());
+      mediaStream = null;
+    }
+    showStatus('Microphone access error: ' + err.message, 'error');
   }
 }
 
@@ -734,6 +799,7 @@ function stopRecording(index) {
   if (recordingSource) recordingSource.disconnect();
   if (recordingContext) { recordingContext.close(); recordingContext = null; }
   clearInterval(recordingTimer);
+  if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
 
   try {
     if (audioChunks.length > 0) {
@@ -750,10 +816,10 @@ function stopRecording(index) {
       samples[index].blob = blob;
       updateSubmitButton();
     } else {
-      alert('Нет аудиоданных');
+      alert('No audio data');
     }
   } catch (err) {
-    alert('Ошибка сохранения: ' + err.message);
+    alert('Save error: ' + err.message);
   }
 
   const btns = document.querySelectorAll('#samples-container .sample')[index].querySelectorAll('.sample-actions button');
@@ -774,7 +840,7 @@ function removeSample(index) {
 function updateSampleNumbers() {
   const divs = document.querySelectorAll('#samples-container .sample');
   divs.forEach((d, i) => {
-    d.querySelector('h3').textContent = 'Сэмпл ' + (i + 1) + ' из 3';
+    d.querySelector('h3').textContent = 'Sample ' + (i + 1) + ' of 3';
     d.querySelector('.sample-num').textContent = i + 1;
     d.querySelector('.text-box p').textContent = TEXTS[i];
   });
@@ -792,8 +858,8 @@ function showStatus(msg, type) {
 
 async function submitEnroll() {
   const uid = document.getElementById('user_id').value.trim();
-  if (!uid) { showStatus('Введите имя пользователя', 'error'); return; }
-  if (samples.length < 1) { showStatus('Запишите хотя бы один сэмпл', 'error'); return; }
+  if (!uid) { showStatus('Enter a username', 'error'); return; }
+  if (samples.length < 1) { showStatus('Record at least one sample', 'error'); return; }
 
   const fd = new FormData();
   fd.append('user_id', uid);
@@ -805,15 +871,15 @@ async function submitEnroll() {
     const r = await fetch('/enroll', { method: 'POST', body: fd });
     const data = await r.json();
     if (r.ok) {
-      showStatus('✓ Успех! ' + data.status, 'success');
+      showStatus('✓ Success! ' + data.status, 'success');
       document.getElementById('samples-container').innerHTML = '';
       samples = [];
       updateSubmitButton();
     } else {
-      showStatus('✗ Ошибка: ' + (data.detail || 'Неизвестная ошибка'), 'error');
+      showStatus('✗ Error: ' + (data.detail || 'Unknown error'), 'error');
     }
   } catch (err) {
-    showStatus('Ошибка соединения: ' + err.message, 'error');
+    showStatus('Connection error: ' + err.message, 'error');
   }
 }
 
@@ -844,7 +910,6 @@ addSample();
 
 @app.post("/enroll", response_model=EnrollResponse)
 async def enroll(user_id: str = Form(...), files: list[UploadFile] = File(...)):
-    """Регистрация нового голоса (создание слепка .npy)"""
     if not files:
         raise HTTPException(status_code=400, detail="At least one audio file is required")
     
@@ -854,13 +919,16 @@ async def enroll(user_id: str = Form(...), files: list[UploadFile] = File(...)):
     try:
         for file in files:
             req_id = str(uuid.uuid4())
-            filename = os.path.basename(file.filename) if file.filename else "upload"
-            temp_input = f"/tmp/{req_id}_{filename}"
+            safe_filename = Path(file.filename).name if file.filename else "upload.raw"
+            temp_input = f"/tmp/{req_id}_{safe_filename}"
             temp_wav = f"/tmp/{req_id}_processed.wav"
             temp_files.extend([temp_input, temp_wav])
             
             with open(temp_input, "wb") as buffer:
                 shutil.copyfileobj(file.file, buffer)
+
+            if os.path.getsize(temp_input) > MAX_FILE_SIZE:
+                raise HTTPException(status_code=413, detail=f"File exceeds {MAX_FILE_SIZE // (1024*1024)}MB limit")
 
             if not convert_to_wav(temp_input, temp_wav):
                 raise HTTPException(status_code=500, detail="Failed to process audio format")
@@ -873,19 +941,39 @@ async def enroll(user_id: str = Form(...), files: list[UploadFile] = File(...)):
                 signal = signal / peak * 0.9
             fbank = compute_fbank(signal.to(device), fs)
             with torch.no_grad():
-                embedding = model(fbank)
+                try:
+                    embedding = model(fbank)
+                except RuntimeError as e:
+                    logger.warning(f"GPU inference failed in enroll, falling back to CPU: {e}")
+                    fbank_cpu = fbank.cpu()
+                    model_cpu = model.cpu()
+                    with torch.no_grad():
+                        embedding = model_cpu(fbank_cpu)
+                    model.to(device)
+                    embedding = embedding.to(device)
             embedding = F.normalize(embedding, p=2, dim=-1)
             embeddings_list.append(embedding.squeeze().cpu())
 
         avg_embeddings = torch.stack(embeddings_list).mean(dim=0)
-        np.save(SPEAKERS_DIR / f"{user_id}.npy", avg_embeddings.numpy())
-        logger.info(f"Голос зарегистрирован: {user_id} ({len(files)} сэмплов)")
+        avg_embeddings = F.normalize(avg_embeddings, p=2, dim=-1)
+        # Atomic write: temp file + rename to prevent corruption on concurrent enrollment
+        tmp_save = f"/tmp/.{uuid.uuid4()}"
+        np.save(tmp_save, avg_embeddings.numpy())
+        shutil.move(tmp_save + ".npy", str(SPEAKERS_DIR / f"{user_id}.npy"))
+        _rebuild_cache()
+        logger.info(f"Voice enrolled: {user_id} ({len(files)} samples)")
         return EnrollResponse(status="success", user_id=user_id)
         
     finally:
         for temp_file in temp_files:
             if os.path.exists(temp_file):
                 os.remove(temp_file)
+
+@app.get("/health")
+async def health():
+    if not _model_ready:
+        raise HTTPException(status_code=503, detail="Model not ready")
+    return {"status": "ok"}
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8001)
