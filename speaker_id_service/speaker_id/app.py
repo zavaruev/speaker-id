@@ -4,6 +4,7 @@ os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
 import uuid
 import sys
 sys.path.insert(0, "/app")
+import asyncio
 import torch
 import torchaudio
 import torchaudio.compliance.kaldi as kaldi
