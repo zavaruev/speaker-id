@@ -74,7 +74,8 @@ class EnrollResponse(BaseModel):
 @app.post("/identify", response_model=IdentifyResponse)
 async def identify(file: UploadFile = File(...)):
     """Распознавание спикера из аудиофайла."""
-    temp_path = f"/tmp/{file.filename}"
+    filename = os.path.basename(file.filename) if file.filename else "upload"
+    temp_path = f"/tmp/{filename}"
     with open(temp_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
         
@@ -105,7 +106,8 @@ async def identify(file: UploadFile = File(...)):
 @app.post("/enroll", response_model=EnrollResponse)
 async def enroll(user_id: str = Form(...), file: UploadFile = File(...)):
     """Регистрация нового голоса (создание слепка .npy)"""
-    temp_path = f"/tmp/{file.filename}"
+    filename = os.path.basename(file.filename) if file.filename else "upload"
+    temp_path = f"/tmp/{filename}"
     with open(temp_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
         
@@ -113,8 +115,8 @@ async def enroll(user_id: str = Form(...), file: UploadFile = File(...)):
         signal, fs = torchaudio.load(temp_path)
         embeddings = classifier.encode_batch(signal)
         
-        np.save(SPEAKERS_DIR / f"{user_id}.npy", embeddings.squeeze().cpu().numpy())
-        return EnrollResponse(status="success", user_id=user_id)
+        np.save(SPEAKERS_DIR / f"{safe_user_id}.npy", embeddings.squeeze().cpu().numpy())
+        return EnrollResponse(status="success", user_id=safe_user_id)
     finally:
         if os.path.exists(temp_path):
             os.remove(temp_path)
