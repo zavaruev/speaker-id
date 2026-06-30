@@ -115,8 +115,8 @@ async def enroll(user_id: str = Form(...), file: UploadFile = File(...)):
         signal, fs = torchaudio.load(temp_path)
         embeddings = classifier.encode_batch(signal)
         
-        np.save(SPEAKERS_DIR / f"{user_id}.npy", embeddings.squeeze().cpu().numpy())
-        return EnrollResponse(status="success", user_id=user_id)
+        np.save(SPEAKERS_DIR / f"{safe_user_id}.npy", embeddings.squeeze().cpu().numpy())
+        return EnrollResponse(status="success", user_id=safe_user_id)
     finally:
         if os.path.exists(temp_path):
             os.remove(temp_path)

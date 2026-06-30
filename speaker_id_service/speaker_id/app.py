@@ -918,6 +918,10 @@ async def enroll(user_id: str = Form(...), files: list[UploadFile] = File(...)):
     
     try:
         for file in files:
+            safe_filename = os.path.basename(file.filename)
+            if not safe_filename:
+                raise HTTPException(status_code=400, detail="Invalid filename")
+
             req_id = str(uuid.uuid4())
             safe_filename = Path(file.filename).name if file.filename else "upload.raw"
             temp_input = f"/tmp/{req_id}_{safe_filename}"
