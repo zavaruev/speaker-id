@@ -74,10 +74,8 @@ class EnrollResponse(BaseModel):
 @app.post("/identify", response_model=IdentifyResponse)
 async def identify(file: UploadFile = File(...)):
     """Распознавание спикера из аудиофайла."""
-    safe_filename = os.path.basename(file.filename)
-    if not safe_filename:
-        raise HTTPException(status_code=400, detail="Invalid filename")
-    temp_path = f"/tmp/{safe_filename}"
+    filename = os.path.basename(file.filename) if file.filename else "upload"
+    temp_path = f"/tmp/{filename}"
     with open(temp_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
         
@@ -108,14 +106,8 @@ async def identify(file: UploadFile = File(...)):
 @app.post("/enroll", response_model=EnrollResponse)
 async def enroll(user_id: str = Form(...), file: UploadFile = File(...)):
     """Регистрация нового голоса (создание слепка .npy)"""
-    safe_user_id = os.path.basename(user_id)
-    if not safe_user_id or safe_user_id == "." or safe_user_id == "..":
-        raise HTTPException(status_code=400, detail="Invalid user_id")
-
-    safe_filename = os.path.basename(file.filename)
-    if not safe_filename:
-        raise HTTPException(status_code=400, detail="Invalid filename")
-    temp_path = f"/tmp/{safe_filename}"
+    filename = os.path.basename(file.filename) if file.filename else "upload"
+    temp_path = f"/tmp/{filename}"
     with open(temp_path, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
         
