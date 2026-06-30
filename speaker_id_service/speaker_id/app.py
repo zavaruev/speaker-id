@@ -100,9 +100,9 @@ def convert_to_wav(input_path: str, output_path: str) -> bool:
     """Convert any audio to 16000Hz Mono WAV via FFmpeg."""
     try:
         subprocess.run([
-            'ffmpeg', '-y', '-i', input_path,
-            '-ar', '16000', '-ac', '1', output_path
-        ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            'ffmpeg', '-y', '-i', str(input_path),
+            '-ar', '16000', '-ac', '1', str(output_path)
+        ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, shell=False)
         return True
     except FileNotFoundError:
         logger.error("FFmpeg not installed in container! Run: apt-get install ffmpeg")
@@ -130,7 +130,8 @@ def _rebuild_cache():
 @app.post("/identify", response_model=IdentifyResponse)
 async def identify(file: UploadFile = File(...)):
     req_id = str(uuid.uuid4())
-    temp_input = f"/tmp/{req_id}_{file.filename}"
+    safe_filename = Path(file.filename).name if file.filename else "upload.raw"
+    temp_input = f"/tmp/{req_id}_{safe_filename}"
     temp_wav = f"/tmp/{req_id}_processed.wav"
     
     with open(temp_input, "wb") as buffer:
@@ -918,7 +919,8 @@ async def enroll(user_id: str = Form(...), files: list[UploadFile] = File(...)):
     try:
         for file in files:
             req_id = str(uuid.uuid4())
-            temp_input = f"/tmp/{req_id}_{file.filename}"
+            safe_filename = Path(file.filename).name if file.filename else "upload.raw"
+            temp_input = f"/tmp/{req_id}_{safe_filename}"
             temp_wav = f"/tmp/{req_id}_processed.wav"
             temp_files.extend([temp_input, temp_wav])
             
