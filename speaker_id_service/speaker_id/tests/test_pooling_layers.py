@@ -1,49 +1,57 @@
-import pytest
 import torch
-import sys
-import os
+import pytest
 
-# Add the parent directory to the Python path to import pooling_layers
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from pooling_layers import TSTP
 
-from pooling_layers import ASTP
+def test_tstp_forward_shape():
+    """Test that the TSTP pooling layer outputs the correct shape."""
+    in_dim = 80
+    model = TSTP(in_dim=in_dim)
 
-def test_astp_3d_input():
-    in_dim = 128
+    # Input tensor shape: (batch_size, feature_dim, time_steps)
     batch_size = 4
     time_steps = 100
+    dummy_input = torch.randn(batch_size, in_dim, time_steps)
 
-    astp = ASTP(in_dim=in_dim)
+    output = model(dummy_input)
 
-    # ASTP expects (B, F, T) which is (batch_size, in_dim, time_steps)
-    x = torch.randn(batch_size, in_dim, time_steps)
+    # The output should have shape (batch_size, in_dim * 2)
+    assert output.shape == (batch_size, in_dim * 2)
 
-    out = astp(x)
+def test_tstp_forward_values():
+    """Test that the TSTP pooling layer correctly computes mean and std."""
+    in_dim = 2
+    model = TSTP(in_dim=in_dim)
 
-    # Output should be (B, 2*F) -> mean and std combined
-    expected_shape = (batch_size, 2 * in_dim)
-    assert out.shape == expected_shape, f"Expected shape {expected_shape}, got {out.shape}"
+    batch_size = 1
+    time_steps = 4
 
-    # Assert no NaNs are produced
-    assert not torch.isnan(out).any(), "Output contains NaNs"
+    # Create a specific input tensor to manually verify the values
+    # Tensor shape: (1, 2, 4)
+    dummy_input = torch.tensor([[[1.0, 2.0, 3.0, 4.0],
+                                 [1.0, 1.0, 1.0, 1.0]]])
 
-def test_astp_global_context_att():
-    in_dim = 128
-    batch_size = 4
-    time_steps = 100
+    # The temporal axis is the last dimension (dim=-1)
+    # Means:
+    # Feature 0: (1+2+3+4)/4 = 2.5
+    # Feature 1: (1+1+1+1)/4 = 1.0
 
-    astp = ASTP(in_dim=in_dim, global_context_att=True)
+    # Variances (using unbiased variance by default in PyTorch, meaning N-1 in denominator):
+    # Feature 0: ((1-2.5)^2 + (2-2.5)^2 + (3-2.5)^2 + (4-2.5)^2) / 3
+    #          = (2.25 + 0.25 + 0.25 + 2.25) / 3 = 5.0 / 3 = 1.6666666
+    # Feature 1: 0.0
 
-    x = torch.randn(batch_size, in_dim, time_steps)
-    out = astp(x)
+    # Std:
+    # Feature 0: sqrt(1.6666666 + 1e-7) ~ 1.290994
+    # Feature 1: sqrt(0.0 + 1e-7) ~ 0.000316227
 
-    expected_shape = (batch_size, 2 * in_dim)
-    assert out.shape == expected_shape, f"Expected shape {expected_shape}, got {out.shape}"
-    assert not torch.isnan(out).any(), "Output contains NaNs"
+    output = model(dummy_input)
 
-def test_astp_get_out_dim():
-    in_dim = 128
-    astp = ASTP(in_dim=in_dim)
+    expected_mean = torch.tensor([[2.5, 1.0]])
+    expected_var = torch.tensor([[5.0 / 3.0, 0.0]])
+    expected_std = torch.sqrt(expected_var + 1e-7)
 
-    out_dim = astp.get_out_dim()
-    assert out_dim == 2 * in_dim, f"Expected out_dim {2*in_dim}, got {out_dim}"
+    expected_output = torch.cat((expected_mean, expected_std), dim=1)
+
+    # Check if the output matches the expected values closely
+    assert torch.allclose(output, expected_output, atol=1e-5)

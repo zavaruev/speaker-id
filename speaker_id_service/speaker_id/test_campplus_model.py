@@ -1,10 +1,35 @@
 import unittest
+import torch
 import torch.nn as nn
 import sys
 import os
 
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
-from campplus_model import get_nonlinear
+from campplus_model import get_nonlinear, DenseLayer
+
+class TestDenseLayer(unittest.TestCase):
+
+    def test_initialization(self):
+        layer = DenseLayer(in_channels=128, out_channels=256, bias=True)
+        self.assertIsInstance(layer, DenseLayer)
+        self.assertEqual(layer.linear.in_channels, 128)
+        self.assertEqual(layer.linear.out_channels, 256)
+        self.assertIsNotNone(layer.linear.bias)
+
+    def test_forward_3d_input(self):
+        layer = DenseLayer(in_channels=128, out_channels=256)
+        layer.eval()
+        x = torch.randn(32, 128, 100)
+        out = layer(x)
+        self.assertEqual(out.shape, (32, 256, 100))
+
+    def test_forward_2d_input(self):
+        layer = DenseLayer(in_channels=128, out_channels=256)
+        layer.eval()
+        x = torch.randn(32, 128)
+        out = layer(x)
+        self.assertEqual(out.shape, (32, 256))
+
 
 class TestGetNonlinear(unittest.TestCase):
 
