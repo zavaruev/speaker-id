@@ -132,16 +132,24 @@ def _rebuild_cache():
 @app.post("/identify", response_model=IdentifyResponse)
 async def identify(file: UploadFile = File(...)):
     req_id = str(uuid.uuid4())
-    safe_filename = Path(file.filename).name if file.filename else "upload.raw"
+    safe_filename = os.path.basename(file.filename) if file.filename else "upload.raw"
+    if not safe_filename or safe_filename in (".", ".."):
+        raise HTTPException(status_code=400, detail="Invalid filename")
     temp_input = f"/tmp/{req_id}_{safe_filename}"
     temp_wav = f"/tmp/{req_id}_processed.wav"
     
-    with open(temp_input, "wb") as buffer:
-        await run_in_threadpool(shutil.copyfileobj, file.file, buffer)
-
     try:
-        if os.path.getsize(temp_input) > MAX_FILE_SIZE:
-            raise HTTPException(status_code=413, detail=f"File exceeds {MAX_FILE_SIZE // (1024*1024)}MB limit")
+        file_size = 0
+        with open(temp_input, "wb") as buffer:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                file_size += len(chunk)
+                if file_size > MAX_FILE_SIZE:
+                    raise HTTPException(status_code=413, detail=f"File exceeds {MAX_FILE_SIZE // (1024*1024)}MB limit")
+                await run_in_threadpool(buffer.write, chunk)
+
         if not convert_to_wav(temp_input, temp_wav):
             raise HTTPException(status_code=500, detail="Failed to process audio format")
 
@@ -912,6 +920,9 @@ addSample();
 
 @app.post("/enroll", response_model=EnrollResponse)
 async def enroll(user_id: str = Form(...), files: list[UploadFile] = File(...)):
+    user_id = os.path.basename(user_id)
+    if not user_id or user_id in (".", ".."):
+        raise HTTPException(status_code=400, detail="Invalid user_id")
     if not files:
         raise HTTPException(status_code=400, detail="At least one audio file is required")
     
@@ -920,21 +931,25 @@ async def enroll(user_id: str = Form(...), files: list[UploadFile] = File(...)):
     
     try:
         for file in files:
-            safe_filename = os.path.basename(file.filename)
-            if not safe_filename:
+            safe_filename = os.path.basename(file.filename) if file.filename else "upload.raw"
+            if not safe_filename or safe_filename in (".", ".."):
                 raise HTTPException(status_code=400, detail="Invalid filename")
 
             req_id = str(uuid.uuid4())
-            safe_filename = Path(file.filename).name if file.filename else "upload.raw"
             temp_input = f"/tmp/{req_id}_{safe_filename}"
             temp_wav = f"/tmp/{req_id}_processed.wav"
             temp_files.extend([temp_input, temp_wav])
             
+            file_size = 0
             with open(temp_input, "wb") as buffer:
-                await run_in_threadpool(shutil.copyfileobj, file.file, buffer)
-
-            if os.path.getsize(temp_input) > MAX_FILE_SIZE:
-                raise HTTPException(status_code=413, detail=f"File exceeds {MAX_FILE_SIZE // (1024*1024)}MB limit")
+                while True:
+                    chunk = await file.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    file_size += len(chunk)
+                    if file_size > MAX_FILE_SIZE:
+                        raise HTTPException(status_code=413, detail=f"File exceeds {MAX_FILE_SIZE // (1024*1024)}MB limit")
+                    await run_in_threadpool(buffer.write, chunk)
 
             if not convert_to_wav(temp_input, temp_wav):
                 raise HTTPException(status_code=500, detail="Failed to process audio format")
