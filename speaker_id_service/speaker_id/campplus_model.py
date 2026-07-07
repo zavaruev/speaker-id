@@ -347,7 +347,20 @@ class CAMPPlus(nn.Module):
                         feat_dim=feat_dim)
         channels = self.head.out_channels
 
-        self.xvector = nn.Sequential(
+        self.xvector, channels = self._build_xvector(
+            channels, init_channels, growth_rate, bn_size, config_str)
+
+        self.pool = getattr(pooling_layers, pooling_func)(in_dim=channels)
+        self.pool_out_dim = self.pool.get_out_dim()
+        self.xvector.add_module('stats', self.pool)
+        self.xvector.add_module(
+            'dense',
+            DenseLayer(self.pool_out_dim, embed_dim, config_str='batchnorm_'))
+
+        self._init_weights()
+
+    def _build_xvector(self, channels, init_channels, growth_rate, bn_size, config_str):
+        xvector = nn.Sequential(
             OrderedDict([
                 ('tdnn',
                  TDNNLayer(channels,
@@ -369,9 +382,9 @@ class CAMPPlus(nn.Module):
                                       kernel_size=kernel_size,
                                       dilation=dilation,
                                       config_str=config_str)
-            self.xvector.add_module('block%d' % (i + 1), block)
+            xvector.add_module('block%d' % (i + 1), block)
             channels = channels + num_layers * growth_rate
-            self.xvector.add_module(
+            xvector.add_module(
                 'transit%d' % (i + 1),
                 TransitLayer(channels,
                              channels // 2,
@@ -379,16 +392,12 @@ class CAMPPlus(nn.Module):
                              config_str=config_str))
             channels //= 2
 
-        self.xvector.add_module('out_nonlinear',
+        xvector.add_module('out_nonlinear',
                                 get_nonlinear(config_str, channels))
 
-        self.pool = getattr(pooling_layers, pooling_func)(in_dim=channels)
-        self.pool_out_dim = self.pool.get_out_dim()
-        self.xvector.add_module('stats', self.pool)
-        self.xvector.add_module(
-            'dense',
-            DenseLayer(self.pool_out_dim, embed_dim, config_str='batchnorm_'))
+        return xvector, channels
 
+    def _init_weights(self):
         for m in self.modules():
             if isinstance(m, (nn.Conv1d, nn.Linear)):
                 nn.init.kaiming_normal_(m.weight.data)
