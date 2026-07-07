@@ -68,5 +68,43 @@ class TestGetNonlinear(unittest.TestCase):
             get_nonlinear('invalid', channels)
         self.assertIn("Unexpected module (invalid)", str(context.exception))
 
+class TestTDNNLayer(unittest.TestCase):
+
+    def test_instantiation(self):
+        in_channels = 16
+        out_channels = 32
+        kernel_size = 3
+
+        from campplus_model import TDNNLayer
+        layer = TDNNLayer(in_channels, out_channels, kernel_size)
+
+        self.assertIsInstance(layer, nn.Module)
+        self.assertIsInstance(layer.linear, nn.Conv1d)
+        self.assertEqual(layer.linear.in_channels, in_channels)
+        self.assertEqual(layer.linear.out_channels, out_channels)
+        self.assertEqual(layer.linear.kernel_size[0], kernel_size)
+
+        self.assertIsInstance(layer.nonlinear, nn.Sequential)
+
+    def test_forward_pass(self):
+        in_channels = 16
+        out_channels = 32
+        kernel_size = 3
+        batch_size = 2
+        seq_len = 50
+
+        from campplus_model import TDNNLayer
+        import torch
+        layer = TDNNLayer(in_channels, out_channels, kernel_size)
+
+        x = torch.randn(batch_size, in_channels, seq_len)
+        output = layer(x)
+
+        # Expected sequence length after Conv1d with kernel_size=3, stride=1, padding=0
+        expected_seq_len = seq_len - kernel_size + 1
+
+        self.assertIsInstance(output, torch.Tensor)
+        self.assertEqual(output.shape, (batch_size, out_channels, expected_seq_len))
+
 if __name__ == '__main__':
     unittest.main()
