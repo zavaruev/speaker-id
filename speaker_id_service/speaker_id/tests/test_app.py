@@ -40,6 +40,29 @@ def test_convert_to_wav_shell_injection(mock_subprocess_run):
         '-ar', '16000', '-ac', '1', '-ar 8000; rm -rf /'
     ], check=True, stdout=app.subprocess.DEVNULL, stderr=app.subprocess.DEVNULL, shell=False)
 
+def test_health_ready():
+    """Test health endpoint when model is ready"""
+    # By default in the mock setup, app._model_ready is True or we can explicitly set it
+    original_ready = app._model_ready
+    try:
+        app._model_ready = True
+        response = client.get("/health")
+        assert response.status_code == 200
+        assert response.json() == {"status": "ok"}
+    finally:
+        app._model_ready = original_ready
+
+def test_health_not_ready():
+    """Test health endpoint when model is not ready"""
+    original_ready = app._model_ready
+    try:
+        app._model_ready = False
+        response = client.get("/health")
+        assert response.status_code == 503
+        assert response.json() == {"detail": "Model not ready"}
+    finally:
+        app._model_ready = original_ready
+
 @patch("app.shutil.copyfileobj")
 @patch("builtins.open", new_callable=MagicMock)
 @patch("app.convert_to_wav")
