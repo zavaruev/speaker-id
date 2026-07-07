@@ -35,7 +35,7 @@ def test_enroll_path_traversal():
     # Send a request with a path traversal payload in user_id
     malicious_user_id = "../../../etc/passwd"
 
-    # In our fix we just sanitize it by taking the basename, which should be "passwd"
+    # We sanitize it by taking the basename, which should be "passwd"
     # So the endpoint should either reject it if it's invalid, or it'll accept it but as "passwd.npy"
     # We test that no file is created outside SPEAKERS_DIR
 
