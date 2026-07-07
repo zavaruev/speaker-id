@@ -1,6 +1,6 @@
 import torch
 import pytest
-from speaker_id_service.speaker_id.pooling_layers import TAP
+from speaker_id_service.speaker_id.pooling_layers import TAP, TSDP
 
 def test_tap_forward_3d():
     """Test TAP (Temporal Average Pooling) with 3D input."""
@@ -62,3 +62,32 @@ def test_tap_multiple_batches():
 
     assert torch.allclose(out, expected)
     assert out.shape == (2, 2)
+
+def test_tsdp_forward_3d():
+    """Test TSDP (Temporal Standard Deviation Pooling) with 3D input."""
+    # Input shape: [Batch, Feature, Time] -> [1, 2, 3]
+    x = torch.tensor([[[1.0, 2.0, 3.0],
+                       [4.0, 6.0, 8.0]]])
+
+    # Standard deviation with Bessel's correction (unbiased=True by default in torch.var)
+    # var of [1,2,3] is 1.0 -> sqrt(1.0 + 1e-7) approx 1.0
+    # var of [4,6,8] is 4.0 -> sqrt(4.0 + 1e-7) approx 2.0
+    expected = torch.tensor([[1.0, 2.0]])
+
+    tsdp = TSDP(in_dim=2)
+    out = tsdp(x)
+
+    assert torch.allclose(out, expected, atol=1e-3)
+
+def test_tsdp_forward_4d():
+    """Test TSDP with 4D input."""
+    # Input shape: [Batch, Channel, Feature, Time] -> [1, 1, 2, 3]
+    x = torch.tensor([[[[1.0, 2.0, 3.0],
+                        [4.0, 6.0, 8.0]]]])
+
+    expected = torch.tensor([[1.0, 2.0]])
+
+    tsdp = TSDP(in_dim=2)
+    out = tsdp(x)
+
+    assert torch.allclose(out, expected, atol=1e-3)
