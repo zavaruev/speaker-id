@@ -32,6 +32,21 @@ from fastapi.testclient import TestClient
 client = TestClient(app.app)
 
 @patch("app.subprocess.run")
+def test_convert_to_wav_success(mock_subprocess_run):
+    """Test successful conversion returns True"""
+    mock_subprocess_run.return_value = MagicMock()
+    result = app.convert_to_wav("input.wav", "output.wav")
+    assert result is True
+
+@patch("app.subprocess.run")
+def test_convert_to_wav_called_process_error(mock_subprocess_run):
+    """Test subprocess.CalledProcessError is caught and returns False"""
+    import subprocess
+    mock_subprocess_run.side_effect = subprocess.CalledProcessError(1, 'ffmpeg')
+    result = app.convert_to_wav("input.wav", "output.wav")
+    assert result is False
+
+@patch("app.subprocess.run")
 def test_convert_to_wav_shell_injection(mock_subprocess_run):
     """Test that command injection is prevented by shell=False and string casting"""
     app.convert_to_wav("input.wav", "-ar 8000; rm -rf /")
