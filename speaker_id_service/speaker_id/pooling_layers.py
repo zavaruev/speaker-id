@@ -410,9 +410,6 @@ class XI(torch.nn.Module):
     def get_out_dim(self):
         return self.output_dim
 
-    def get_prior(self):
-        return self.prior_mean, self.prior_logprec
-
 if __name__ == '__main__':
     data = torch.randn(16, 512, 10, 35)
     # model = StatisticsPooling()
