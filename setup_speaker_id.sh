@@ -29,6 +29,7 @@ import torchaudio
 import numpy as np
 import torch.nn.functional as F
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel
 from speechbrain.inference.speaker import EncoderClassifier
 from pathlib import Path
@@ -41,6 +42,8 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI()
+
+MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB limit
 
 SPEAKERS_DIR = Path("/app/speakers")
 MODELS_DIR = Path("/app/models/speaker_id")
@@ -75,11 +78,22 @@ class EnrollResponse(BaseModel):
 async def identify(file: UploadFile = File(...)):
     """Распознавание спикера из аудиофайла."""
     filename = os.path.basename(file.filename) if file.filename else "upload"
+    if not filename:
+        filename = "upload"
     temp_path = f"/tmp/{filename}"
-    with open(temp_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
         
     try:
+        file_size = 0
+        with open(temp_path, "wb") as buffer:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                file_size += len(chunk)
+                if file_size > MAX_FILE_SIZE:
+                    raise HTTPException(status_code=413, detail=f"File exceeds {MAX_FILE_SIZE // (1024*1024)}MB limit")
+                await run_in_threadpool(buffer.write, chunk)
+
         signal, fs = torchaudio.load(temp_path)
         embeddings = classifier.encode_batch(signal)
         
@@ -107,11 +121,22 @@ async def identify(file: UploadFile = File(...)):
 async def enroll(user_id: str = Form(...), file: UploadFile = File(...)):
     """Регистрация нового голоса (создание слепка .npy)"""
     filename = os.path.basename(file.filename) if file.filename else "upload"
+    if not filename:
+        filename = "upload"
     temp_path = f"/tmp/{filename}"
-    with open(temp_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
         
     try:
+        file_size = 0
+        with open(temp_path, "wb") as buffer:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                file_size += len(chunk)
+                if file_size > MAX_FILE_SIZE:
+                    raise HTTPException(status_code=413, detail=f"File exceeds {MAX_FILE_SIZE // (1024*1024)}MB limit")
+                await run_in_threadpool(buffer.write, chunk)
+
         signal, fs = torchaudio.load(temp_path)
         embeddings = classifier.encode_batch(signal)
         
