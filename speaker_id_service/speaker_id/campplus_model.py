@@ -395,17 +395,6 @@ class CAMPPlus(nn.Module):
                 if m.bias is not None:
                     nn.init.zeros_(m.bias)
 
-    def get_frame_level_feat(self, x):
-        # for outer interface
-        x = x.permute(0, 2, 1)  # (B,T,F) => (B,F,T)
-        x = self.head(x)
-        for layer in self.xvector[:-2]:
-            x = layer(x)
-
-        out = x.permute(0, 2, 1)
-
-        return out  # (B, T, D)
-
     def forward(self, x):
         x = x.permute(0, 2, 1)  # (B,T,F) => (B,F,T)
         x = self.head(x)

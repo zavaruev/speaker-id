@@ -38,21 +38,3 @@ def test_campplus_forward_pass():
     expected_embed_dim = 512
     assert output.shape == (batch_size, expected_embed_dim)
 
-def test_campplus_get_frame_level_feat():
-    """Test the get_frame_level_feat method of the CAMPPlus model."""
-    model = CAMPPlus(feat_dim=80, embed_dim=512, pooling_func='TSTP')
-    model.eval()
-
-    batch_size = 1
-    time_steps = 200
-    feat_dim = 80
-    dummy_input = torch.zeros(batch_size, time_steps, feat_dim)
-
-    with torch.no_grad():
-        output = model.get_frame_level_feat(dummy_input)
-
-    # Check that output is a 3D tensor: (batch_size, time_steps // 2, channels)
-    # The TDNN layer has stride=2, which halves the time dimension
-    assert len(output.shape) == 3
-    assert output.shape[0] == batch_size
-    assert output.shape[1] == time_steps // 2
