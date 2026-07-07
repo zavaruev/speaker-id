@@ -20,7 +20,6 @@ import logging
 import shutil
 import uvicorn
 import subprocess
-import asyncio
 import threading
 
 # Setup and logging
