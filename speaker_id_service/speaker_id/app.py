@@ -152,7 +152,7 @@ async def identify(file: UploadFile = File(...)):
         if not convert_to_wav(temp_input, temp_wav):
             raise HTTPException(status_code=500, detail="Failed to process audio format")
 
-        signal, fs = torchaudio.load(temp_wav)
+        signal, fs = await run_in_threadpool(torchaudio.load, temp_wav)
         if signal.numel() == 0 or signal.shape[-1] < 4000:
             raise HTTPException(status_code=400, detail="Audio too short or empty")
         peak = signal.abs().max()
@@ -953,7 +953,7 @@ async def enroll(user_id: str = Form(...), files: list[UploadFile] = File(...)):
             if not convert_to_wav(temp_input, temp_wav):
                 raise HTTPException(status_code=500, detail="Failed to process audio format")
 
-            signal, fs = torchaudio.load(temp_wav)
+            signal, fs = await run_in_threadpool(torchaudio.load, temp_wav)
             if signal.numel() == 0 or signal.shape[-1] < 4000:
                 raise HTTPException(status_code=400, detail="Audio too short or empty")
             peak = signal.abs().max()
