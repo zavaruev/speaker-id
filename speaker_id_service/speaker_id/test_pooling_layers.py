@@ -1,5 +1,4 @@
 import torch
-import pytest
 from pooling_layers import TAP
 
 def test_tap_forward():
