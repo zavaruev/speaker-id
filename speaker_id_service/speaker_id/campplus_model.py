@@ -108,11 +108,20 @@ class CAMLayer(nn.Module):
         self.sigmoid = nn.Sigmoid()
 
     def forward(self, x):
+        is_2d = False
+        if len(x.shape) == 2:
+            x = x.unsqueeze(0)
+            is_2d = True
+
         y = self.linear_local(x)
         context = x.mean(-1, keepdim=True) + self.seg_pooling(x)
         context = self.relu(self.linear1(context))
         m = self.sigmoid(self.linear2(context))
-        return y * m
+        out = y * m
+
+        if is_2d:
+            out = out.squeeze(0)
+        return out
 
     def seg_pooling(self, x, seg_len: int = 100, stype: str = 'avg'):
         if stype == 'avg':

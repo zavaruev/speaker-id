@@ -5,7 +5,7 @@ import sys
 import os
 
 sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
-from campplus_model import get_nonlinear, DenseLayer
+from campplus_model import get_nonlinear, DenseLayer, CAMLayer
 
 class TestDenseLayer(unittest.TestCase):
 
@@ -92,6 +92,66 @@ class TestGetNonlinear(unittest.TestCase):
         with self.assertRaises(ValueError) as context:
             get_nonlinear('invalid', channels)
         self.assertIn("Unexpected module (invalid)", str(context.exception))
+
+class TestCAMLayer(unittest.TestCase):
+
+    def test_initialization(self):
+        bn_channels = 16
+        out_channels = 32
+        kernel_size = 3
+        layer = CAMLayer(bn_channels=bn_channels, out_channels=out_channels,
+                         kernel_size=kernel_size, stride=1, padding=1,
+                         dilation=1, bias=False)
+        self.assertIsInstance(layer, CAMLayer)
+        self.assertEqual(layer.linear_local.in_channels, bn_channels)
+        self.assertEqual(layer.linear_local.out_channels, out_channels)
+        self.assertEqual(layer.linear_local.kernel_size[0], kernel_size)
+
+    def test_forward_3d_input(self):
+        bn_channels = 16
+        out_channels = 32
+        layer = CAMLayer(bn_channels=bn_channels, out_channels=out_channels,
+                         kernel_size=3, stride=1, padding=1,
+                         dilation=1, bias=False)
+        layer.eval()
+
+        batch_size = 2
+        time_steps = 50
+        x = torch.randn(batch_size, bn_channels, time_steps)
+        out = layer(x)
+        self.assertEqual(out.shape, (batch_size, out_channels, time_steps))
+
+    def test_forward_2d_input(self):
+        bn_channels = 16
+        out_channels = 32
+        layer = CAMLayer(bn_channels=bn_channels, out_channels=out_channels,
+                         kernel_size=3, stride=1, padding=1,
+                         dilation=1, bias=False)
+        layer.eval()
+
+        time_steps = 50
+        x = torch.randn(bn_channels, time_steps)
+        out = layer(x)
+        self.assertEqual(out.shape, (out_channels, time_steps))
+
+    def test_seg_pooling(self):
+        layer = CAMLayer(bn_channels=16, out_channels=32, kernel_size=3,
+                         stride=1, padding=1, dilation=1, bias=False)
+
+        x = torch.randn(2, 16, 50)
+
+        # Test avg pooling
+        out_avg = layer.seg_pooling(x, stype='avg')
+        self.assertEqual(out_avg.shape, (2, 16, 50))
+
+        # Test max pooling
+        out_max = layer.seg_pooling(x, stype='max')
+        self.assertEqual(out_max.shape, (2, 16, 50))
+
+        # Test invalid pooling type
+        with self.assertRaises(ValueError):
+            layer.seg_pooling(x, stype='invalid')
+
 
 class TestTDNNLayer(unittest.TestCase):
 
