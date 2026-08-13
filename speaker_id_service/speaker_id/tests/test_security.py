@@ -81,6 +81,21 @@ def test_enroll_invalid_user_ids():
     assert response.status_code == 400
     assert "Invalid user_id" in response.json()["detail"]
 
+def test_enroll_too_many_files():
+    file_content = b"dummy audio content"
+    files = []
+    for i in range(51):
+        files.append(("files", (f"test{i}.wav", io.BytesIO(file_content), "audio/wav")))
+
+    response = client.post(
+        "/enroll",
+        data={"user_id": "test_user"},
+        files=files
+    )
+    assert response.status_code == 400
+    assert "Too many files uploaded" in response.json()["detail"]
+
+
 def test_filename_sanitization():
     file_content = b"dummy audio content"
 
