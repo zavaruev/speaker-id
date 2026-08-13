@@ -115,7 +115,7 @@ async def identify(file: UploadFile = File(...)):
         return IdentifyResponse(user_id=best_user, confidence=max_score)
     finally:
         if os.path.exists(temp_path):
-            os.remove(temp_path)
+            await run_in_threadpool(os.remove, temp_path)
 
 @app.post("/enroll", response_model=EnrollResponse)
 async def enroll(user_id: str = Form(...), file: UploadFile = File(...)):
@@ -144,7 +144,7 @@ async def enroll(user_id: str = Form(...), file: UploadFile = File(...)):
         return EnrollResponse(status="success", user_id=safe_user_id)
     finally:
         if os.path.exists(temp_path):
-            os.remove(temp_path)
+            await run_in_threadpool(os.remove, temp_path)
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8001)

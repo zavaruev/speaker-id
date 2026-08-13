@@ -200,9 +200,9 @@ async def identify(file: UploadFile = File(...)):
         
     finally:
         if os.path.exists(temp_input):
-            os.remove(temp_input)
+            await run_in_threadpool(os.remove, temp_input)
         if os.path.exists(temp_wav):
-            os.remove(temp_wav)
+            await run_in_threadpool(os.remove, temp_wav)
 
 @app.get("/enroll", response_class=HTMLResponse)
 async def enroll_form():
@@ -987,7 +987,7 @@ async def enroll(user_id: str = Form(...), files: list[UploadFile] = File(...)):
     finally:
         for temp_file in temp_files:
             if os.path.exists(temp_file):
-                os.remove(temp_file)
+                await run_in_threadpool(os.remove, temp_file)
 
 @app.get("/health")
 async def health():
