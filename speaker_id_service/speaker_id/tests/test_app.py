@@ -126,6 +126,26 @@ def test_enroll_path_traversal(mock_remove, mock_getsize, mock_load, mock_conver
     assert "../" not in open_args
     assert "/etc/" not in open_args
 
+@patch("builtins.open", new_callable=MagicMock)
+@patch("app.convert_to_wav", return_value=True)
+@patch("app.torchaudio.load")
+@patch("os.remove", return_value=None)
+def test_enroll_empty_signal(mock_remove, mock_load, mock_convert, mock_open):
+    """Test that an empty or too short signal in /enroll raises a 400 error."""
+    mock_signal = MagicMock()
+    mock_signal.numel.return_value = 1000
+    mock_signal.shape = [1, 1000]
+    mock_load.return_value = (mock_signal, 16000)
+
+    response = client.post(
+        "/enroll",
+        data={"user_id": "test_user"},
+        files=[("files", ("test.wav", b"dummy content", "audio/wav"))]
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Audio too short or empty"
+
 @patch("app.Path.glob")
 def test_rebuild_cache_empty(mock_glob):
     """Test _rebuild_cache when no speaker files are present"""
