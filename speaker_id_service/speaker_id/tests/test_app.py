@@ -19,6 +19,7 @@ sys.modules['torchaudio.compliance.kaldi'] = MagicMock()
 sys.modules['campplus_model'] = MagicMock()
 
 import urllib.request
+_orig_urlretrieve = urllib.request.urlretrieve
 urllib.request.urlretrieve = MagicMock()
 
 import torch
@@ -27,6 +28,14 @@ torch.cuda = MagicMock()
 torch.cuda.is_available.return_value = False
 
 import app
+
+# Restore real modules once app is imported, so that subsequent tests
+# (model/pooling layers) run against the actual torch/torchaudio.
+for _mod in ('torch', 'torch.nn', 'torch.nn.functional', 'torchaudio',
+             'torchaudio.compliance', 'torchaudio.compliance.kaldi', 'campplus_model'):
+    sys.modules.pop(_mod, None)
+urllib.request.urlretrieve = _orig_urlretrieve
+
 from fastapi.testclient import TestClient
 
 client = TestClient(app.app)
@@ -181,6 +190,7 @@ def test_enroll_empty_signal(mock_remove, mock_load, mock_convert, mock_open):
 
     response = client.post(
         "/enroll",
+        headers={"X-API-Key": "default_secret_key"},
         data={"user_id": "test_user"},
         files=[("files", ("test.wav", b"dummy content", "audio/wav"))]
     )

@@ -5,21 +5,11 @@ from unittest.mock import patch, MagicMock
 
 # Mock the urllib and torch.load dependencies to prevent downloading the heavy model and loading it
 # These must be mocked BEFORE importing app
-patch("urllib.request.urlretrieve", MagicMock()).start()
+with patch("urllib.request.urlretrieve", MagicMock()), \
+     patch("torch.load", MagicMock(return_value={})), \
+     patch("campplus_model.CAMPPlus", MagicMock(return_value=MagicMock())):
 
-mock_model = MagicMock()
-mock_model.eval = MagicMock()
-mock_model.to = MagicMock()
-mock_model.load_state_dict = MagicMock()
-
-# Mock torch.load to just return an empty dict, or one that matches expected structure
-mock_ckpt = {}
-patch("torch.load", MagicMock(return_value=mock_ckpt)).start()
-
-# We need to mock the CAMPPlus class as well to avoid model loading
-patch("campplus_model.CAMPPlus", MagicMock(return_value=mock_model)).start()
-
-from app import app, SPEAKERS_DIR
+    from app import app, SPEAKERS_DIR
 
 client = TestClient(app)
 
@@ -128,6 +118,7 @@ def test_enroll_too_many_files():
 
     response = client.post(
         "/enroll",
+        headers={"X-API-Key": "default_secret_key"},
         data={"user_id": "test_user"},
         files=files
     )
