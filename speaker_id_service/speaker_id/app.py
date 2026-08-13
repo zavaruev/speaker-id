@@ -21,6 +21,7 @@ import shutil
 import uvicorn
 import subprocess
 import threading
+import tempfile
 
 # Setup and logging
 logging.basicConfig(level=logging.INFO)
@@ -134,8 +135,12 @@ async def identify(file: UploadFile = File(...)):
     safe_filename = os.path.basename(file.filename) if file.filename else "upload.raw"
     if not safe_filename or safe_filename in (".", ".."):
         raise HTTPException(status_code=400, detail="Invalid filename")
-    temp_input = f"/tmp/{req_id}_{safe_filename}"
-    temp_wav = f"/tmp/{req_id}_processed.wav"
+
+    # Create secure temporary files
+    fd_input, temp_input = tempfile.mkstemp(prefix=f"{req_id}_", suffix=f"_{safe_filename}")
+    fd_wav, temp_wav = tempfile.mkstemp(prefix=f"{req_id}_", suffix="_processed.wav")
+    os.close(fd_input)
+    os.close(fd_wav)
     
     try:
         file_size = 0
@@ -935,8 +940,11 @@ async def enroll(user_id: str = Form(...), files: list[UploadFile] = File(...)):
                 raise HTTPException(status_code=400, detail="Invalid filename")
 
             req_id = str(uuid.uuid4())
-            temp_input = f"/tmp/{req_id}_{safe_filename}"
-            temp_wav = f"/tmp/{req_id}_processed.wav"
+            fd_input, temp_input = tempfile.mkstemp(prefix=f"{req_id}_", suffix=f"_{safe_filename}")
+            fd_wav, temp_wav = tempfile.mkstemp(prefix=f"{req_id}_", suffix="_processed.wav")
+            os.close(fd_input)
+            os.close(fd_wav)
+
             temp_files.extend([temp_input, temp_wav])
             
             file_size = 0

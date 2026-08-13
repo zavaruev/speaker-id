@@ -36,6 +36,7 @@ from pathlib import Path
 import logging
 import shutil
 import uvicorn
+import tempfile
 
 # Инициализация и логирование
 logging.basicConfig(level=logging.INFO)
@@ -80,7 +81,8 @@ async def identify(file: UploadFile = File(...)):
     filename = os.path.basename(file.filename) if file.filename else "upload"
     if not filename:
         filename = "upload"
-    temp_path = f"/tmp/{filename}"
+    fd, temp_path = tempfile.mkstemp(prefix="identify_", suffix=f"_{filename}")
+    os.close(fd)
         
     try:
         file_size = 0
@@ -123,7 +125,8 @@ async def enroll(user_id: str = Form(...), file: UploadFile = File(...)):
     filename = os.path.basename(file.filename) if file.filename else "upload"
     if not filename:
         filename = "upload"
-    temp_path = f"/tmp/{filename}"
+    fd, temp_path = tempfile.mkstemp(prefix="enroll_", suffix=f"_{filename}")
+    os.close(fd)
         
     try:
         file_size = 0
