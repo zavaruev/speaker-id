@@ -1,7 +1,7 @@
 import torch
 import pytest
 
-from pooling_layers import TSTP
+from pooling_layers import TSTP, MHASTP
 
 def test_tstp_forward_shape():
     """Test that the TSTP pooling layer outputs the correct shape."""
@@ -55,3 +55,47 @@ def test_tstp_forward_values():
 
     # Check if the output matches the expected values closely
     assert torch.allclose(output, expected_output, atol=1e-5)
+
+def test_mhastp_forward_shape_3d():
+    """Test that the MHASTP pooling layer outputs the correct shape for 3D input."""
+    in_dim = 80
+    head_num = 4
+    model = MHASTP(in_dim=in_dim, head_num=head_num)
+
+    # Input tensor shape: (batch_size, feature_dim, time_steps)
+    batch_size = 4
+    time_steps = 100
+    dummy_input = torch.randn(batch_size, in_dim, time_steps)
+
+    output = model(dummy_input)
+
+    # The output should have shape (batch_size, in_dim * 2)
+    assert output.shape == (batch_size, in_dim * 2)
+
+def test_mhastp_forward_shape_4d():
+    """Test that the MHASTP pooling layer outputs the correct shape for 4D input."""
+    # For 4D input, it flattens the channel and feature dimensions.
+    # So if input is (B, C, F, T), then in_dim should be C * F.
+    channels = 8
+    features = 10
+    in_dim = channels * features
+    head_num = 4
+    model = MHASTP(in_dim=in_dim, head_num=head_num)
+
+    # Input tensor shape: (batch_size, channels, features, time_steps)
+    batch_size = 4
+    time_steps = 100
+    dummy_input = torch.randn(batch_size, channels, features, time_steps)
+
+    output = model(dummy_input)
+
+    # The output should have shape (batch_size, in_dim * 2)
+    assert output.shape == (batch_size, in_dim * 2)
+
+def test_mhastp_invalid_head_num():
+    """Test that MHASTP raises an AssertionError if in_dim is not divisible by head_num."""
+    in_dim = 80
+    head_num = 3 # 80 is not divisible by 3
+
+    with pytest.raises(AssertionError):
+        MHASTP(in_dim=in_dim, head_num=head_num)
