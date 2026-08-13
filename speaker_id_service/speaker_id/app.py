@@ -24,6 +24,15 @@ import threading
 
 # Setup and logging
 logging.basicConfig(level=logging.INFO)
+
+def _safe_remove(path: str):
+    try:
+        os.remove(path)
+    except FileNotFoundError:
+        pass
+    except Exception as e:
+        logger.warning(f"Failed to remove {path}: {e}")
+
 for _logger in ["httpx", "urllib3", "filelock"]:
     logging.getLogger(_logger).setLevel(logging.ERROR)
 logger = logging.getLogger(__name__)
@@ -200,9 +209,9 @@ async def identify(file: UploadFile = File(...)):
         
     finally:
         if os.path.exists(temp_input):
-            os.remove(temp_input)
+            await run_in_threadpool(_safe_remove, temp_input)
         if os.path.exists(temp_wav):
-            os.remove(temp_wav)
+            await run_in_threadpool(_safe_remove, temp_wav)
 
 @app.get("/enroll", response_class=HTMLResponse)
 async def enroll_form():
@@ -987,7 +996,7 @@ async def enroll(user_id: str = Form(...), files: list[UploadFile] = File(...)):
     finally:
         for temp_file in temp_files:
             if os.path.exists(temp_file):
-                os.remove(temp_file)
+                await run_in_threadpool(_safe_remove, temp_file)
 
 @app.get("/health")
 async def health():
