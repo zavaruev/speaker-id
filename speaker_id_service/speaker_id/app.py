@@ -13,6 +13,7 @@ import torch.nn.functional as F
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.responses import HTMLResponse
 from fastapi.concurrency import run_in_threadpool
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from campplus_model import CAMPPlus
 from pathlib import Path
@@ -29,6 +30,17 @@ for _logger in ["httpx", "urllib3", "filelock"]:
 logger = logging.getLogger(__name__)
 
 app = FastAPI()
+
+allowed_origins_str = os.getenv("ALLOWED_ORIGINS", "http://localhost,http://localhost:8001")
+allowed_origins = [origin.strip() for origin in allowed_origins_str.split(",") if origin.strip()]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=allowed_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 SPEAKERS_DIR = Path("/app/speakers")
 MODELS_DIR = Path("/app/models/speaker_id")
