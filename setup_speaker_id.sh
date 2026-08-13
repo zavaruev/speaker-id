@@ -147,7 +147,14 @@ async def enroll(user_id: str = Form(...), file: UploadFile = File(...)):
             os.remove(temp_path)
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8001)
+    ssl_keyfile = os.environ.get("SSL_KEYFILE")
+    ssl_certfile = os.environ.get("SSL_CERTFILE")
+    if ssl_keyfile and ssl_certfile:
+        logger.info("Starting server with SSL/TLS enabled.")
+        uvicorn.run(app, host="0.0.0.0", port=8001, ssl_keyfile=ssl_keyfile, ssl_certfile=ssl_certfile)
+    else:
+        logger.warning("WARNING: Starting server without SSL/TLS. In production, ensure this service is behind a reverse proxy (like Nginx) that handles HTTPS.")
+        uvicorn.run(app, host="0.0.0.0", port=8001)
 EOF
 
 # 4. Генерируем правильный Dockerfile с CUDA 11.8
