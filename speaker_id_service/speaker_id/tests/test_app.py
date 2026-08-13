@@ -231,3 +231,50 @@ def test_identify_file_size_limit():
 
     assert response.status_code == 413
     assert "File exceeds" in response.json()["detail"]
+
+@patch("builtins.open", new_callable=MagicMock)
+@patch("app.convert_to_wav")
+@patch("app.torchaudio.load")
+@patch("os.remove", return_value=None)
+@patch("app.compute_fbank")
+@patch("app.F.normalize")
+@patch("app.logger")
+def test_identify_gpu_fallback(mock_logger, mock_normalize, mock_fbank, mock_remove, mock_load, mock_convert, mock_open):
+    """Test that GPU fallback executes when model(fbank) raises RuntimeError."""
+    mock_convert.return_value = True
+
+    mock_signal = MagicMock()
+    mock_signal.numel.return_value = 8000
+    mock_signal.shape = [1, 8000]
+    mock_signal.abs().max.return_value = 1.0
+    mock_signal.to.return_value = mock_signal
+    mock_load.return_value = (mock_signal, 16000)
+
+    mock_fbank_tensor = MagicMock()
+    mock_fbank_tensor_cpu = MagicMock()
+    mock_fbank_tensor.cpu.return_value = mock_fbank_tensor_cpu
+    mock_fbank.return_value = mock_fbank_tensor
+
+    mock_cpu_model = MagicMock()
+    mock_cpu_model_embedding = MagicMock()
+    mock_cpu_model_embedding.to.return_value = MagicMock()
+    mock_cpu_model.return_value = mock_cpu_model_embedding
+
+    with patch("app.model") as mock_model, \
+         patch("app._embedding_matrix", None), \
+         patch("app._rebuild_cache"):
+
+        mock_model.side_effect = RuntimeError("OOM")
+        mock_model.cpu.return_value = mock_cpu_model
+
+        response = client.post(
+            "/identify",
+            files={"file": ("test.wav", b"dummy content", "audio/wav")}
+        )
+
+        assert response.status_code == 200
+        mock_model.cpu.assert_called_once()
+        mock_fbank_tensor.cpu.assert_called_once()
+        mock_cpu_model.assert_called_once_with(mock_fbank_tensor_cpu)
+        mock_model.to.assert_called_once_with(app.device)
+        mock_logger.warning.assert_called_with("GPU inference failed, falling back to CPU: OOM")
