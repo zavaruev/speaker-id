@@ -149,7 +149,7 @@ async def identify(file: UploadFile = File(...)):
                     raise HTTPException(status_code=413, detail=f"File exceeds {MAX_FILE_SIZE // (1024*1024)}MB limit")
                 await run_in_threadpool(buffer.write, chunk)
 
-        if not convert_to_wav(temp_input, temp_wav):
+        if not await run_in_threadpool(convert_to_wav, temp_input, temp_wav):
             raise HTTPException(status_code=500, detail="Failed to process audio format")
 
         signal, fs = torchaudio.load(temp_wav)
@@ -950,7 +950,7 @@ async def enroll(user_id: str = Form(...), files: list[UploadFile] = File(...)):
                         raise HTTPException(status_code=413, detail=f"File exceeds {MAX_FILE_SIZE // (1024*1024)}MB limit")
                     await run_in_threadpool(buffer.write, chunk)
 
-            if not convert_to_wav(temp_input, temp_wav):
+            if not await run_in_threadpool(convert_to_wav, temp_input, temp_wav):
                 raise HTTPException(status_code=500, detail="Failed to process audio format")
 
             signal, fs = torchaudio.load(temp_wav)
