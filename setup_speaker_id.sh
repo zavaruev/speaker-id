@@ -36,6 +36,7 @@ from pathlib import Path
 import logging
 import shutil
 import uvicorn
+import re
 
 # Инициализация и логирование
 logging.basicConfig(level=logging.INFO)
@@ -120,6 +121,10 @@ async def identify(file: UploadFile = File(...)):
 @app.post("/enroll", response_model=EnrollResponse)
 async def enroll(user_id: str = Form(...), file: UploadFile = File(...)):
     """Регистрация нового голоса (создание слепка .npy)"""
+    safe_user_id = os.path.basename(user_id)
+    if not safe_user_id or not re.match(r"^[a-zA-Z0-9_-]+$", safe_user_id):
+        raise HTTPException(status_code=400, detail="Invalid user_id")
+
     filename = os.path.basename(file.filename) if file.filename else "upload"
     if not filename:
         filename = "upload"

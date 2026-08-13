@@ -20,6 +20,7 @@ import shutil
 import uvicorn
 import subprocess
 import threading
+import re
 
 # Setup and logging
 logging.basicConfig(level=logging.INFO)
@@ -919,7 +920,7 @@ addSample();
 @app.post("/enroll", response_model=EnrollResponse)
 async def enroll(user_id: str = Form(...), files: list[UploadFile] = File(...)):
     user_id = os.path.basename(user_id)
-    if not user_id or user_id in (".", ".."):
+    if not user_id or not re.match(r"^[a-zA-Z0-9_-]+$", user_id):
         raise HTTPException(status_code=400, detail="Invalid user_id")
     if not files:
         raise HTTPException(status_code=400, detail="At least one audio file is required")
