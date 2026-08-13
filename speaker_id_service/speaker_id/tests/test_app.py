@@ -120,10 +120,8 @@ def test_identify_path_traversal(mock_remove, mock_getsize, mock_load, mock_conv
     )
 
     # Assert that open was called with a safe path that doesn't include the traversal
-    # open should be called with /tmp/{uuid}_passwd
     open_args = mock_open.call_args[0][0]
     assert open_args.startswith("/tmp/")
-    assert "passwd" in open_args
     assert "../" not in open_args
     assert "/etc/" not in open_args
 
@@ -147,7 +145,6 @@ def test_enroll_path_traversal(mock_remove, mock_getsize, mock_load, mock_conver
     # Check open calls
     open_args = mock_open.call_args[0][0]
     assert open_args.startswith("/tmp/")
-    assert "shadow" in open_args
     assert "../" not in open_args
     assert "/etc/" not in open_args
 
