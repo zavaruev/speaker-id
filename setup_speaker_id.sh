@@ -107,7 +107,7 @@ async def identify(file: UploadFile = File(...)):
                     raise HTTPException(status_code=413, detail=f"File exceeds {MAX_FILE_SIZE // (1024*1024)}MB limit")
                 await buffer.write(chunk)
 
-        signal, fs = torchaudio.load(temp_path)
+        signal, fs = await run_in_threadpool(torchaudio.load, temp_path)
         embeddings = classifier.encode_batch(signal)
         
         max_score = 0.0
@@ -156,7 +156,7 @@ async def enroll(user_id: str = Form(...), file: UploadFile = File(...)):
                     raise HTTPException(status_code=413, detail=f"File exceeds {MAX_FILE_SIZE // (1024*1024)}MB limit")
                 await buffer.write(chunk)
 
-        signal, fs = torchaudio.load(temp_path)
+        signal, fs = await run_in_threadpool(torchaudio.load, temp_path)
         embeddings = classifier.encode_batch(signal)
         
         np.save(SPEAKERS_DIR / f"{safe_user_id}.npy", embeddings.squeeze().cpu().numpy())
