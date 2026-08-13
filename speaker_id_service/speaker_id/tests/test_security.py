@@ -2,8 +2,6 @@ import pytest
 import io
 from fastapi.testclient import TestClient
 from unittest.mock import patch, MagicMock
-import os
-import torch
 
 # Mock the urllib and torch.load dependencies to prevent downloading the heavy model and loading it
 # These must be mocked BEFORE importing app
