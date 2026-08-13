@@ -30,6 +30,7 @@ import numpy as np
 import torch.nn.functional as F
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.concurrency import run_in_threadpool
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from speechbrain.inference.speaker import EncoderClassifier
 from pathlib import Path
@@ -42,6 +43,17 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI()
+
+allowed_origins_str = os.getenv("ALLOWED_ORIGINS", "http://localhost,http://localhost:8001")
+allowed_origins = [origin.strip() for origin in allowed_origins_str.split(",") if origin.strip()]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=allowed_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB limit
 
