@@ -3,6 +3,7 @@ os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
 os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
 import uuid
 import sys
+import asyncio
 import tempfile
 import anyio
 sys.path.insert(0, "/app")
