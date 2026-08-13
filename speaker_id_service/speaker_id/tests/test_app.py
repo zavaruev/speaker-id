@@ -115,6 +115,7 @@ def test_enroll_path_traversal(mock_remove, mock_getsize, mock_load, mock_conver
     malicious_filename = "../../../etc/shadow"
     response = client.post(
         "/enroll",
+        headers={"X-API-Key": "default_secret_key"},
         data={"user_id": "test_user"},
         files=[("files", (malicious_filename, b"dummy content", "audio/mpeg"))]
     )

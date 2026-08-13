@@ -25,6 +25,43 @@ from app import app, SPEAKERS_DIR
 
 client = TestClient(app)
 
+def test_enroll_unauthorized():
+    """Test that requests to /enroll without the correct API key are rejected"""
+    file_content = b"dummy audio content"
+
+    # Missing API key
+    response = client.post(
+        "/enroll",
+        data={"user_id": "test_user"},
+        files=[("files", ("test.wav", io.BytesIO(file_content), "audio/wav"))]
+    )
+    assert response.status_code == 401
+    assert "Invalid or missing API Key" in response.json()["detail"]
+
+    # Invalid API key
+    response = client.post(
+        "/enroll",
+        headers={"X-API-Key": "wrong_key"},
+        data={"user_id": "test_user"},
+        files=[("files", ("test.wav", io.BytesIO(file_content), "audio/wav"))]
+    )
+    assert response.status_code == 401
+    assert "Invalid or missing API Key" in response.json()["detail"]
+
+def test_enroll_authorized():
+    """Test that requests to /enroll with the correct API key proceed past the auth check"""
+    file_content = b"dummy audio content"
+
+    # Since we've mocked many things, the request will likely fail with 400
+    # (e.g. audio empty) or 500 (FFmpeg), but it should NOT return 401.
+    response = client.post(
+        "/enroll",
+        headers={"X-API-Key": "default_secret_key"},
+        data={"user_id": "test_user"},
+        files=[("files", ("test.wav", io.BytesIO(file_content), "audio/wav"))]
+    )
+    assert response.status_code != 401
+
 def test_enroll_path_traversal():
     """Test that path traversal attempts in user_id are correctly sanitized and blocked if necessary"""
     # Create a dummy audio file
@@ -41,6 +78,7 @@ def test_enroll_path_traversal():
 
     response = client.post(
         "/enroll",
+        headers={"X-API-Key": "default_secret_key"},
         data={"user_id": malicious_user_id},
         files=[("files", (file.name, file, "audio/wav"))]
     )
@@ -57,6 +95,7 @@ def test_enroll_invalid_user_ids():
     # Empty after basename
     response = client.post(
         "/enroll",
+        headers={"X-API-Key": "default_secret_key"},
         data={"user_id": "///"},
         files=[("files", ("test.wav", io.BytesIO(file_content), "audio/wav"))]
     )
@@ -66,6 +105,7 @@ def test_enroll_invalid_user_ids():
     # "." after basename
     response = client.post(
         "/enroll",
+        headers={"X-API-Key": "default_secret_key"},
         data={"user_id": "."},
         files=[("files", ("test.wav", io.BytesIO(file_content), "audio/wav"))]
     )
@@ -75,6 +115,7 @@ def test_enroll_invalid_user_ids():
     # ".." after basename
     response = client.post(
         "/enroll",
+        headers={"X-API-Key": "default_secret_key"},
         data={"user_id": ".."},
         files=[("files", ("test.wav", io.BytesIO(file_content), "audio/wav"))]
     )

@@ -28,8 +28,9 @@ import torch
 import torchaudio
 import numpy as np
 import torch.nn.functional as F
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Security
 from fastapi.concurrency import run_in_threadpool
+from fastapi.security import APIKeyHeader
 from pydantic import BaseModel
 from speechbrain.inference.speaker import EncoderClassifier
 from pathlib import Path
@@ -56,6 +57,18 @@ logger.info(f"--- Speaker ID Service ---")
 logger.info(f"Device: {device}")
 if device == "cuda":
     logger.info(f"GPU: {torch.cuda.get_device_name(0)}")
+
+API_KEY_NAME = "X-API-Key"
+api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
+
+async def get_api_key(api_key: str = Security(api_key_header)):
+    expected_api_key = os.environ.get("API_KEY", "default_secret_key")
+    if api_key == expected_api_key:
+        return api_key
+    raise HTTPException(
+        status_code=401,
+        detail="Invalid or missing API Key",
+    )
 
 # Загружаем легковесную и точную модель от SpeechBrain
 logger.info("Загрузка модели SpeechBrain...")
@@ -118,7 +131,7 @@ async def identify(file: UploadFile = File(...)):
             os.remove(temp_path)
 
 @app.post("/enroll", response_model=EnrollResponse)
-async def enroll(user_id: str = Form(...), file: UploadFile = File(...)):
+async def enroll(user_id: str = Form(...), file: UploadFile = File(...), api_key: str = Security(get_api_key)):
     """Регистрация нового голоса (создание слепка .npy)"""
     filename = os.path.basename(file.filename) if file.filename else "upload"
     if not filename:

@@ -48,6 +48,7 @@ class TestSpeakerID(unittest.TestCase):
                     with patch("torch.load", return_value={}):
                         response = client.post(
                             "/enroll",
+                            headers={"X-API-Key": "default_secret_key"},
                             data={"user_id": "test_user"},
                             files={"files": ("../../../var/log/syslog", b"dummy audio content", "audio/wav")}
                         )

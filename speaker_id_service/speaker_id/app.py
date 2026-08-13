@@ -10,9 +10,10 @@ import torchaudio
 import torchaudio.compliance.kaldi as kaldi
 import numpy as np
 import torch.nn.functional as F
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Security
 from fastapi.responses import HTMLResponse
 from fastapi.concurrency import run_in_threadpool
+from fastapi.security import APIKeyHeader
 from pydantic import BaseModel
 from campplus_model import CAMPPlus
 from pathlib import Path
@@ -77,6 +78,18 @@ _embedding_matrix: torch.Tensor | None = None
 _cache_lock = threading.Lock()
 # Pre-create resampler to avoid re-initialization per request
 _resampler_16k = torchaudio.transforms.Resample(orig_freq=16000, new_freq=16000).to(device)
+
+API_KEY_NAME = "X-API-Key"
+api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
+
+async def get_api_key(api_key: str = Security(api_key_header)):
+    expected_api_key = os.environ.get("API_KEY", "default_secret_key")
+    if api_key == expected_api_key:
+        return api_key
+    raise HTTPException(
+        status_code=401,
+        detail="Invalid or missing API Key",
+    )
 
 def compute_fbank(signal: torch.Tensor, fs: int) -> torch.Tensor:
     if fs != 16000:
@@ -662,6 +675,11 @@ audio::-webkit-media-controls-panel {
     <input type="text" id="user_id" placeholder="e.g. alexander" value="">
   </div>
 
+  <div class="form-group">
+    <label for="api_key">API Key</label>
+    <input type="password" id="api_key" placeholder="Enter API key" value="" style="width: 100%; height: 44px; padding: 0 var(--s-md); border: 1px solid var(--c-hairline); border-radius: var(--r-pill); font: 400 var(--t-body); background: var(--c-canvas-alt); color: var(--c-ink); outline: none; transition: border-color 0.2s, background 0.3s;">
+  </div>
+
   <div class="samples-container" id="samples-container"></div>
 
   <button class="btn-add" id="add-sample-btn" onclick="addSample()">+ Add sample</button>
@@ -867,8 +885,10 @@ function showStatus(msg, type) {
 
 async function submitEnroll() {
   const uid = document.getElementById('user_id').value.trim();
+  const apiKey = document.getElementById('api_key').value.trim();
   if (!uid) { showStatus('Enter a username', 'error'); return; }
   if (samples.length < 1) { showStatus('Record at least one sample', 'error'); return; }
+  if (!apiKey) { showStatus('Enter an API key', 'error'); return; }
 
   const fd = new FormData();
   fd.append('user_id', uid);
@@ -877,7 +897,13 @@ async function submitEnroll() {
   });
 
   try {
-    const r = await fetch('/enroll', { method: 'POST', body: fd });
+    const r = await fetch('/enroll', {
+      method: 'POST',
+      headers: {
+        'X-API-Key': apiKey
+      },
+      body: fd
+    });
     const data = await r.json();
     if (r.ok) {
       showStatus('✓ Success! ' + data.status, 'success');
@@ -918,7 +944,7 @@ addSample();
 
 
 @app.post("/enroll", response_model=EnrollResponse)
-async def enroll(user_id: str = Form(...), files: list[UploadFile] = File(...)):
+async def enroll(user_id: str = Form(...), files: list[UploadFile] = File(...), api_key: str = Security(get_api_key)):
     user_id = os.path.basename(user_id)
     if not user_id or user_id in (".", ".."):
         raise HTTPException(status_code=400, detail="Invalid user_id")
