@@ -80,6 +80,31 @@ def test_health_not_ready():
 
 @patch("app.shutil.copyfileobj")
 @patch("builtins.open", new_callable=MagicMock)
+@patch("app.convert_to_wav", return_value=True)
+@patch("app.torchaudio.load")
+@patch("os.path.getsize", return_value=1024)
+@patch("os.remove", return_value=None)
+def test_identify_empty_signal(mock_remove, mock_getsize, mock_load, mock_convert, mock_open, mock_copy):
+    """Test identify endpoint handles empty/short audio signal"""
+
+    # Mocking torch tensor shape since torch itself is mocked in this file
+    mock_tensor = MagicMock()
+    mock_tensor.numel.return_value = 0
+    mock_tensor.shape = [0, 0]
+
+    mock_load.return_value = (mock_tensor, 16000)
+
+    response = client.post(
+        "/identify",
+        files={"file": ("test.wav", b"dummy content", "audio/wav")}
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {"detail": "Audio too short or empty"}
+
+
+@patch("app.shutil.copyfileobj")
+@patch("builtins.open", new_callable=MagicMock)
 @patch("app.convert_to_wav")
 @patch("app.torchaudio.load")
 @patch("os.path.getsize", return_value=1024)
