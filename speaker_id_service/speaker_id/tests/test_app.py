@@ -31,29 +31,48 @@ from fastapi.testclient import TestClient
 
 client = TestClient(app.app)
 
-@patch("app.subprocess.run")
-def test_convert_to_wav_success(mock_subprocess_run):
+from unittest.mock import AsyncMock
+
+@pytest.mark.asyncio
+@patch("app.asyncio.create_subprocess_exec")
+async def test_convert_to_wav_success(mock_create_subprocess_exec):
     """Test successful conversion returns True"""
-    mock_subprocess_run.return_value = MagicMock()
-    result = app.convert_to_wav("input.wav", "output.wav")
+    mock_process = AsyncMock()
+    mock_process.communicate = AsyncMock()
+    mock_process.returncode = 0
+    mock_create_subprocess_exec.return_value = mock_process
+
+    result = await app.convert_to_wav("input.wav", "output.wav")
     assert result is True
 
-@patch("app.subprocess.run")
-def test_convert_to_wav_called_process_error(mock_subprocess_run):
-    """Test subprocess.CalledProcessError is caught and returns False"""
-    import subprocess
-    mock_subprocess_run.side_effect = subprocess.CalledProcessError(1, 'ffmpeg')
-    result = app.convert_to_wav("input.wav", "output.wav")
+@pytest.mark.asyncio
+@patch("app.asyncio.create_subprocess_exec")
+async def test_convert_to_wav_called_process_error(mock_create_subprocess_exec):
+    """Test that non-zero return code returns False"""
+    mock_process = AsyncMock()
+    mock_process.communicate = AsyncMock()
+    mock_process.returncode = 1
+    mock_create_subprocess_exec.return_value = mock_process
+
+    result = await app.convert_to_wav("input.wav", "output.wav")
     assert result is False
 
-@patch("app.subprocess.run")
-def test_convert_to_wav_shell_injection(mock_subprocess_run):
-    """Test that command injection is prevented by shell=False and string casting"""
-    app.convert_to_wav("input.wav", "-ar 8000; rm -rf /")
-    mock_subprocess_run.assert_called_once_with([
+@pytest.mark.asyncio
+@patch("app.asyncio.create_subprocess_exec")
+async def test_convert_to_wav_shell_injection(mock_create_subprocess_exec):
+    """Test that command injection is prevented by string casting and passing args directly to exec"""
+    mock_process = AsyncMock()
+    mock_process.communicate = AsyncMock()
+    mock_process.returncode = 0
+    mock_create_subprocess_exec.return_value = mock_process
+
+    await app.convert_to_wav("input.wav", "-ar 8000; rm -rf /")
+    mock_create_subprocess_exec.assert_called_once_with(
         'ffmpeg', '-y', '-i', 'input.wav',
-        '-ar', '16000', '-ac', '1', '-ar 8000; rm -rf /'
-    ], check=True, stdout=app.subprocess.DEVNULL, stderr=app.subprocess.DEVNULL, shell=False)
+        '-ar', '16000', '-ac', '1', '-ar 8000; rm -rf /',
+        stdout=app.asyncio.subprocess.DEVNULL,
+        stderr=app.asyncio.subprocess.DEVNULL
+    )
 
 def test_health_ready():
     """Test health endpoint when model is ready"""
@@ -80,7 +99,7 @@ def test_health_not_ready():
 
 @patch("app.shutil.copyfileobj")
 @patch("builtins.open", new_callable=MagicMock)
-@patch("app.convert_to_wav", return_value=True)
+@patch("app.convert_to_wav", new_callable=AsyncMock, return_value=True)
 @patch("app.torchaudio.load")
 @patch("os.path.getsize", return_value=1024)
 @patch("os.remove", return_value=None)
@@ -105,7 +124,7 @@ def test_identify_empty_signal(mock_remove, mock_getsize, mock_load, mock_conver
 
 @patch("app.shutil.copyfileobj")
 @patch("builtins.open", new_callable=MagicMock)
-@patch("app.convert_to_wav")
+@patch("app.convert_to_wav", new_callable=AsyncMock)
 @patch("app.torchaudio.load")
 @patch("os.path.getsize", return_value=1024)
 @patch("os.remove", return_value=None)
@@ -127,7 +146,7 @@ def test_identify_path_traversal(mock_remove, mock_getsize, mock_load, mock_conv
 
 @patch("app.shutil.copyfileobj")
 @patch("builtins.open", new_callable=MagicMock)
-@patch("app.convert_to_wav")
+@patch("app.convert_to_wav", new_callable=AsyncMock)
 @patch("app.torchaudio.load")
 @patch("os.path.getsize", return_value=1024)
 @patch("os.remove", return_value=None)
@@ -149,7 +168,7 @@ def test_enroll_path_traversal(mock_remove, mock_getsize, mock_load, mock_conver
     assert "/etc/" not in open_args
 
 @patch("builtins.open", new_callable=MagicMock)
-@patch("app.convert_to_wav", return_value=True)
+@patch("app.convert_to_wav", new_callable=AsyncMock, return_value=True)
 @patch("app.torchaudio.load")
 @patch("os.remove", return_value=None)
 def test_enroll_empty_signal(mock_remove, mock_load, mock_convert, mock_open):
@@ -275,7 +294,7 @@ def test_identify_file_size_limit():
     assert "File exceeds" in response.json()["detail"]
 
 @patch("builtins.open", new_callable=MagicMock)
-@patch("app.convert_to_wav")
+@patch("app.convert_to_wav", new_callable=AsyncMock)
 @patch("app.torchaudio.load")
 @patch("os.remove", return_value=None)
 @patch("app.compute_fbank")

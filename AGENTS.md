@@ -1,0 +1,46 @@
+# Speaker ID
+
+Docker Compose project hosting a FastAPI speaker-identification service (WeSpeaker CAMPPlus, 512-dim embeddings). The only live code lives in `speaker_id_service/`; everything else at the root is docs or legacy.
+
+## Layout
+
+- `speaker_id_service/` — the service: `docker-compose.yaml`, `enroll_client.sh`, plus the app in `speaker_id/` (FastAPI `app.py`, CAMPPlus model code, Dockerfile). **Read `speaker_id_service/AGENTS.md` — it has the full architecture, API table, and audio pipeline; this file only covers what it omits.**
+- `DESIGN.md` — Apple design-system spec for the `/enroll` UI. That UI is an inline HTML string inside `speaker_id/app.py` (lines ~207–917); UI changes happen there, not in a template dir.
+- `setup_speaker_id.sh` — legacy installer (README: "kept for reference"). Do not use; it generates an outdated speechbrain-based app.
+
+## Run
+
+```bash
+cd speaker_id_service
+docker compose up --build
+```
+
+- Requires NVIDIA GPU host (CUDA 11.8, Pascal+) + `nvidia-container-toolkit`; compose reserves `count: all` GPUs. Container may be rebuilt by the tooling.
+- Server on `:8001`; readiness = log line `CAMPPlus model successfully loaded!`. First start downloads the 63 MB checkpoint from HuggingFace into the bind-mounted `./models/speaker_id/` (models/ and speakers/ are gitignored — recreate dirs if missing).
+- `docker compose exec speaker_id bash` to enter the container.
+
+## Tests
+
+No pytest config, no pytest/torch in `requirements.txt` — pytest is not installed in the image.
+
+Test code is duplicated across **three** locations (all variants of `test_campplus_model.py` / `test_pooling_layers.py` exist in several):
+
+- `speaker_id_service/speaker_id/tests/` — main suite (`test_app.py`, `test_path_traversal.py`, `test_security.py`, `test_campplus_model.py`, `test_pooling_layers.py`)
+- `speaker_id_service/tests/test_campplus_model.py` — imports via `../speaker_id`
+- `tests/test_campplus_model.py` (repo root) — imports `speaker_id_service.speaker_id.campplus_model`
+
+Run the suite inside the container (only `speaker_id/` contents are copied into the image, so the two outer test dirs aren't available there):
+
+```bash
+docker compose exec speaker_id pip install pytest
+docker compose exec speaker_id python -m pytest tests -q
+```
+
+App tests (`test_app.py`, `test_security.py`, `test_path_traversal.py`) mock `torch`/`torchaudio` into `sys.modules` *before* importing `app` — don't remove that mocking or they'll try to load the real model. Model/pooling tests need real torch, so they only run where torch is installed (container or a CUDA-capable host env).
+
+## Gotchas
+
+- `/identify` and `/enroll` sanitize filenames with `os.path.basename` and reject `.`/`..`; there are dedicated path-traversal tests — preserve this behavior.
+- 50 MB upload cap (HTTP 413), min audio 4000 samples (~0.25 s), confidence < 0.4 → `"unknown"`.
+- Enrolled voices are `.npy` files in the mounted `./speakers/` volume; enrollment is atomic (tmp + rename) and rebuilds an in-memory cosine-similarity cache.
+- GPU inference has a CPU fallback on `RuntimeError` — keep it.

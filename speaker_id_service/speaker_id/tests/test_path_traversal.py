@@ -1,7 +1,7 @@
 import sys
 import os
 import unittest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
 
 # Create a dummy model directory to avoid urllib downloads during module import
 os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
@@ -24,7 +24,7 @@ class TestSpeakerID(unittest.TestCase):
         # It should not attempt to write outside of /tmp directory with the exact requested filename.
         with patch("builtins.open", MagicMock()) as mock_open:
             with patch("shutil.copyfileobj", MagicMock()):
-                with patch("app.convert_to_wav", return_value=False):
+                with patch("app.convert_to_wav", new_callable=AsyncMock, return_value=False):
                     with patch("torch.load", return_value={}):
                         response = client.post(
                             "/identify",
@@ -43,7 +43,7 @@ class TestSpeakerID(unittest.TestCase):
     def test_enroll_path_traversal(self):
         with patch("builtins.open", MagicMock()) as mock_open:
             with patch("shutil.copyfileobj", MagicMock()):
-                with patch("app.convert_to_wav", return_value=False):
+                with patch("app.convert_to_wav", new_callable=AsyncMock, return_value=False):
                     with patch("torch.load", return_value={}):
                         response = client.post(
                             "/enroll",

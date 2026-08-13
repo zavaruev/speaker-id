@@ -40,8 +40,8 @@ docker compose down
 
 GPU: NVIDIA with CUDA 11.8 (Pascal+). Container runs `nvidia` device driver reservation.
 
-## Env vars (docker-compose.yaml)
+## Env vars
 
-- `HF_TOKEN=0`, `HF_HUB_VERBOSITY=error` — suppress HuggingFace noise (not used directly)
-- `SB_LOG_LEVEL=ERROR`, `HF_HUB_DISABLE_SYMLINKS_WARNING=1`, `HF_HUB_DISABLE_PROGRESS_BARS=1`
+- `docker-compose.yaml`: `HF_TOKEN=0`, `HF_HUB_VERBOSITY=error` — suppress HuggingFace noise
+- Set in `app.py` via `os.environ`: `HF_HUB_DISABLE_SYMLINKS_WARNING=1`, `HF_HUB_DISABLE_PROGRESS_BARS=1`
 - Minimum audio: 4000 samples (~0.25s at 16kHz)

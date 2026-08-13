@@ -109,19 +109,24 @@ class EnrollResponse(BaseModel):
     status: str
     user_id: str
 
-def convert_to_wav(input_path: str, output_path: str) -> bool:
+async def convert_to_wav(input_path: str, output_path: str) -> bool:
     """Convert any audio to 16000Hz Mono WAV via FFmpeg."""
     try:
-        subprocess.run([
+        process = await asyncio.create_subprocess_exec(
             'ffmpeg', '-y', '-i', str(input_path),
-            '-ar', '16000', '-ac', '1', str(output_path)
-        ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, shell=False)
+            '-ar', '16000', '-ac', '1', str(output_path),
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL
+        )
+        await process.communicate()
+
+        if process.returncode != 0:
+            logger.error(f"FFmpeg conversion error: exit code {process.returncode}")
+            return False
+
         return True
     except FileNotFoundError:
         logger.error("FFmpeg not installed in container! Run: apt-get install ffmpeg")
-        return False
-    except subprocess.CalledProcessError as e:
-        logger.error(f"FFmpeg conversion error: {e}")
         return False
 
 def _rebuild_cache():
@@ -163,7 +168,7 @@ async def identify(file: UploadFile = File(...)):
                     raise HTTPException(status_code=413, detail=f"File exceeds {MAX_FILE_SIZE // (1024*1024)}MB limit")
                 await buffer.write(chunk)
 
-        if not convert_to_wav(temp_input, temp_wav):
+        if not await convert_to_wav(temp_input, temp_wav):
             raise HTTPException(status_code=500, detail="Failed to process audio format")
 
         signal, fs = torchaudio.load(temp_wav)
@@ -967,7 +972,7 @@ async def enroll(user_id: str = Form(...), files: list[UploadFile] = File(...)):
                         raise HTTPException(status_code=413, detail=f"File exceeds {MAX_FILE_SIZE // (1024*1024)}MB limit")
                     await buffer.write(chunk)
 
-            if not convert_to_wav(temp_input, temp_wav):
+            if not await convert_to_wav(temp_input, temp_wav):
                 raise HTTPException(status_code=500, detail="Failed to process audio format")
 
             signal, fs = torchaudio.load(temp_wav)
