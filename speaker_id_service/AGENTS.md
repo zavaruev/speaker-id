@@ -25,9 +25,11 @@
 |--------|------|-------|--------|
 | POST | `/identify` | `file` (single UploadFile) | `{ user_id, confidence }` |
 | GET | `/enroll` | — | HTML form |
-| POST | `/enroll` | `user_id` (form) + `files` (multiple UploadFile) | `{ status, user_id }` |
+| POST | `/enroll` | `user_id` (form) + `files` (multiple UploadFile) + header `X-API-Key` | `{ status, user_id }` |
 
-Multiple audio samples are average-embedded into one `.npy`. Temporary files use UUID to survive concurrent requests.
+`/enroll` requires `X-API-Key` (env `API_KEY`, fallback `default_secret_key`); the inline UI has a key field, `enroll_client.sh` does not send it (401). `user_id` must match `^[a-zA-Z0-9_-]+$`; max 50 files (`MAX_FILES`).
+
+Multiple audio samples are average-embedded into one `.npy`. Upload temp files use `tempfile.NamedTemporaryFile` + `anyio.open_file`; `convert_to_wav` is async (`asyncio.create_subprocess_exec`); cleanup via `run_in_threadpool(_safe_remove, ...)`; `torchaudio.load` via `run_in_threadpool`. TLS is opt-in via `SSL_KEYFILE`/`SSL_CERTFILE`.
 
 ## Developer Commands
 

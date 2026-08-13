@@ -36,11 +36,14 @@ docker compose exec speaker_id pip install pytest
 docker compose exec speaker_id python -m pytest tests -q
 ```
 
-App tests (`test_app.py`, `test_security.py`, `test_path_traversal.py`) mock `torch`/`torchaudio` into `sys.modules` *before* importing `app` — don't remove that mocking or they'll try to load the real model. Model/pooling tests need real torch, so they only run where torch is installed (container or a CUDA-capable host env).
+App tests (`test_app.py`, `test_security.py`, `test_path_traversal.py`) mock `torch`/`torchaudio` into `sys.modules` *before* importing `app` — don't remove that mocking or they'll try to load the real model. Since `convert_to_wav` is now async, those tests patch it with `unittest.mock.AsyncMock` — preserve that. Model/pooling tests need real torch, so they only run where torch is installed (container or a CUDA-capable host env).
 
 ## Gotchas
 
-- `/identify` and `/enroll` sanitize filenames with `os.path.basename` and reject `.`/`..`; there are dedicated path-traversal tests — preserve this behavior.
+- `/enroll` requires an API key: header `X-API-Key`, value = env `API_KEY` (fallback `default_secret_key` — weak, and `docker-compose.yaml` does not set it). The inline UI sends it from a form field; `enroll_client.sh` does **not** and will fail with 401.
+- `user_id` is restricted to `^[a-zA-Z0-9_-]+$` (after `os.path.basename`); filenames are sanitized with `os.path.basename`, `.`/`..` and exceeding `MAX_FILES = 50` files → 400. There are dedicated path-traversal/security tests — preserve this behavior.
 - 50 MB upload cap (HTTP 413), min audio 4000 samples (~0.25 s), confidence < 0.4 → `"unknown"`.
 - Enrolled voices are `.npy` files in the mounted `./speakers/` volume; enrollment is atomic (tmp + rename) and rebuilds an in-memory cosine-similarity cache.
 - GPU inference has a CPU fallback on `RuntimeError` — keep it.
+- Upload temp files use `tempfile.NamedTemporaryFile`, file writes via `anyio.open_file`, `convert_to_wav` runs `asyncio.create_subprocess_exec`, cleanup via `run_in_threadpool(_safe_remove, ...)` — keep these async patterns (no blocking `open`/`os.remove`/`subprocess.run` in request paths).
+- TLS is opt-in via env `SSL_KEYFILE`/`SSL_CERTFILE` in the `uvicorn.run` block (no certs → plain HTTP).
