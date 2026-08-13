@@ -43,6 +43,14 @@ import re
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+def _safe_remove(path: str):
+    try:
+        os.remove(path)
+    except FileNotFoundError:
+        pass
+    except Exception as e:
+        logger.warning(f"Failed to remove {path}: {e}")
+
 app = FastAPI()
 
 MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB limit
@@ -119,7 +127,7 @@ async def identify(file: UploadFile = File(...)):
         return IdentifyResponse(user_id=best_user, confidence=max_score)
     finally:
         if os.path.exists(temp_path):
-            os.remove(temp_path)
+            await run_in_threadpool(_safe_remove, temp_path)
 
 @app.post("/enroll", response_model=EnrollResponse)
 async def enroll(user_id: str = Form(...), file: UploadFile = File(...)):
@@ -154,7 +162,7 @@ async def enroll(user_id: str = Form(...), file: UploadFile = File(...)):
         return EnrollResponse(status="success", user_id=safe_user_id)
     finally:
         if os.path.exists(temp_path):
-            os.remove(temp_path)
+            await run_in_threadpool(_safe_remove, temp_path)
 
 if __name__ == "__main__":
     ssl_keyfile = os.environ.get("SSL_KEYFILE")
