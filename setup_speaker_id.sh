@@ -24,6 +24,7 @@ EOF
 echo "🐍 Создаем app.py..."
 cat << 'EOF' > speaker_id/app.py
 import os
+import tempfile
 import torch
 import torchaudio
 import numpy as np
@@ -80,7 +81,9 @@ async def identify(file: UploadFile = File(...)):
     filename = os.path.basename(file.filename) if file.filename else "upload"
     if not filename:
         filename = "upload"
-    temp_path = f"/tmp/{filename}"
+    ext = os.path.splitext(filename)[1] or ".raw"
+    with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
+        temp_path = tmp.name
         
     try:
         file_size = 0
@@ -123,7 +126,9 @@ async def enroll(user_id: str = Form(...), file: UploadFile = File(...)):
     filename = os.path.basename(file.filename) if file.filename else "upload"
     if not filename:
         filename = "upload"
-    temp_path = f"/tmp/{filename}"
+    ext = os.path.splitext(filename)[1] or ".raw"
+    with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
+        temp_path = tmp.name
         
     try:
         file_size = 0

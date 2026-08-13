@@ -3,6 +3,7 @@ os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
 os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
 import uuid
 import sys
+import tempfile
 sys.path.insert(0, "/app")
 import asyncio
 import torch
@@ -130,12 +131,14 @@ def _rebuild_cache():
 
 @app.post("/identify", response_model=IdentifyResponse)
 async def identify(file: UploadFile = File(...)):
-    req_id = str(uuid.uuid4())
     safe_filename = os.path.basename(file.filename) if file.filename else "upload.raw"
     if not safe_filename or safe_filename in (".", ".."):
         raise HTTPException(status_code=400, detail="Invalid filename")
-    temp_input = f"/tmp/{req_id}_{safe_filename}"
-    temp_wav = f"/tmp/{req_id}_processed.wav"
+
+    ext = os.path.splitext(safe_filename)[1] or ".raw"
+    with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp1, tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp2:
+        temp_input = tmp1.name
+        temp_wav = tmp2.name
     
     try:
         file_size = 0
@@ -934,9 +937,10 @@ async def enroll(user_id: str = Form(...), files: list[UploadFile] = File(...)):
             if not safe_filename or safe_filename in (".", ".."):
                 raise HTTPException(status_code=400, detail="Invalid filename")
 
-            req_id = str(uuid.uuid4())
-            temp_input = f"/tmp/{req_id}_{safe_filename}"
-            temp_wav = f"/tmp/{req_id}_processed.wav"
+            ext = os.path.splitext(safe_filename)[1] or ".raw"
+            with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp1, tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp2:
+                temp_input = tmp1.name
+                temp_wav = tmp2.name
             temp_files.extend([temp_input, temp_wav])
             
             file_size = 0
