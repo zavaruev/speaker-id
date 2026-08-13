@@ -1,6 +1,6 @@
 import torch
 import pytest
-from speaker_id_service.speaker_id.pooling_layers import TAP, TSDP
+from speaker_id_service.speaker_id.pooling_layers import TAP, TSDP, ASTP
 
 def test_tap_forward_3d():
     """Test TAP (Temporal Average Pooling) with 3D input."""
@@ -78,6 +78,63 @@ def test_tsdp_forward_3d():
     out = tsdp(x)
 
     assert torch.allclose(out, expected, atol=1e-3)
+
+def test_astp_forward_3d():
+    """Test ASTP (Attentive Statistics Pooling) with 3D input."""
+    # Input shape: [Batch, Feature, Time] -> [2, 4, 10]
+    torch.manual_seed(42)
+    x = torch.randn(2, 4, 10)
+    astp = ASTP(in_dim=4, bottleneck_dim=8, global_context_att=False)
+
+    # We test output dimensions because exact values depend on initialized weights
+    out = astp(x)
+    assert out.shape == (2, 8)  # 2 * in_dim
+    assert astp.get_out_dim() == 8
+
+def test_astp_forward_4d():
+    """Test ASTP with 4D input."""
+    # Input shape: [Batch, Channel, Feature, Time] -> [2, 1, 4, 10]
+    torch.manual_seed(42)
+    x = torch.randn(2, 1, 4, 10)
+    astp = ASTP(in_dim=4, bottleneck_dim=8, global_context_att=False)
+
+    out = astp(x)
+    assert out.shape == (2, 8)
+    assert astp.get_out_dim() == 8
+
+def test_astp_forward_global_context():
+    """Test ASTP with global context enabled."""
+    torch.manual_seed(42)
+    x = torch.randn(2, 4, 10)
+    astp = ASTP(in_dim=4, bottleneck_dim=8, global_context_att=True)
+
+    out = astp(x)
+    assert out.shape == (2, 8)
+    assert astp.get_out_dim() == 8
+
+def test_astp_gradient():
+    """Test if ASTP maintains gradients."""
+    torch.manual_seed(42)
+    x = torch.randn(2, 4, 10, requires_grad=True)
+    astp = ASTP(in_dim=4, bottleneck_dim=8, global_context_att=False)
+
+    out = astp(x)
+    loss = out.sum()
+    loss.backward()
+
+    assert x.grad is not None
+    assert x.grad.shape == (2, 4, 10)
+
+def test_astp_deterministic():
+    """Test if ASTP outputs are deterministic for the same input."""
+    torch.manual_seed(42)
+    x = torch.randn(2, 4, 10)
+    astp = ASTP(in_dim=4, bottleneck_dim=8, global_context_att=False)
+
+    out1 = astp(x)
+    out2 = astp(x)
+
+    assert torch.allclose(out1, out2)
 
 def test_tsdp_forward_4d():
     """Test TSDP with 4D input."""
