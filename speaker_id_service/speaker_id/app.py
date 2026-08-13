@@ -70,6 +70,7 @@ logger.info("Model warm-up done")
 _model_ready = True
 
 MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB limit
+MAX_FILES = 50  # Max number of files allowed for enrollment
 
 # Embedding cache for batched cosine similarity
 _embedding_names: list[str] = []
@@ -924,6 +925,8 @@ async def enroll(user_id: str = Form(...), files: list[UploadFile] = File(...)):
         raise HTTPException(status_code=400, detail="Invalid user_id")
     if not files:
         raise HTTPException(status_code=400, detail="At least one audio file is required")
+    if len(files) > MAX_FILES:
+        raise HTTPException(status_code=400, detail="Too many files uploaded")
     
     embeddings_list = []
     temp_files = []
