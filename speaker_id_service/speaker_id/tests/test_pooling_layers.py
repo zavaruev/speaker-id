@@ -1,7 +1,7 @@
 import torch
 import pytest
 
-from pooling_layers import TSTP
+from pooling_layers import TSTP, MQMHASTP
 
 def test_tstp_forward_shape():
     """Test that the TSTP pooling layer outputs the correct shape."""
@@ -55,3 +55,39 @@ def test_tstp_forward_values():
 
     # Check if the output matches the expected values closely
     assert torch.allclose(output, expected_output, atol=1e-5)
+
+def test_mqmhastp_forward_shape():
+    """Test that the MQMHASTP pooling layer outputs the correct shape for 3D input."""
+    in_dim = 80
+    query_num = 2
+    head_num = 8
+    model = MQMHASTP(in_dim=in_dim, query_num=query_num, head_num=head_num)
+
+    # Input tensor shape: (batch_size, feature_dim, time_steps)
+    batch_size = 4
+    time_steps = 100
+    dummy_input = torch.randn(batch_size, in_dim, time_steps)
+
+    output = model(dummy_input)
+
+    # The output should have shape (batch_size, in_dim * 2 * query_num)
+    assert output.shape == (batch_size, in_dim * 2 * query_num)
+
+def test_mqmhastp_forward_shape_4d():
+    """Test that the MQMHASTP pooling layer correctly handles 4D inputs."""
+    in_dim = 80
+    channels = 4
+    features = 20 # channels * features = in_dim = 80
+    query_num = 2
+    head_num = 8
+    model = MQMHASTP(in_dim=in_dim, query_num=query_num, head_num=head_num)
+
+    batch_size = 4
+    time_steps = 100
+    # Input tensor shape: (batch_size, channels, features, time_steps)
+    dummy_input = torch.randn(batch_size, channels, features, time_steps)
+
+    output = model(dummy_input)
+
+    # The output should still have shape (batch_size, in_dim * 2 * query_num)
+    assert output.shape == (batch_size, in_dim * 2 * query_num)
