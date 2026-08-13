@@ -131,5 +131,57 @@ class TestTDNNLayer(unittest.TestCase):
         self.assertIsInstance(output, torch.Tensor)
         self.assertEqual(output.shape, (batch_size, out_channels, expected_seq_len))
 
+
+class TestFCM(unittest.TestCase):
+
+    def test_initialization(self):
+        from campplus_model import FCM, BasicResBlock
+        m_channels = 32
+        feat_dim = 80
+        num_blocks = [2, 2]
+
+        model = FCM(block=BasicResBlock, num_blocks=num_blocks, m_channels=m_channels, feat_dim=feat_dim)
+
+        self.assertIsInstance(model, nn.Module)
+        self.assertIsInstance(model.conv1, nn.Conv2d)
+        self.assertEqual(model.conv1.in_channels, 1)
+        self.assertEqual(model.conv1.out_channels, m_channels)
+        self.assertEqual(model.conv1.kernel_size, (3, 3))
+
+        self.assertIsInstance(model.layer1, nn.Sequential)
+        self.assertIsInstance(model.layer2, nn.Sequential)
+        self.assertEqual(len(model.layer1), num_blocks[0])
+        self.assertEqual(len(model.layer2), num_blocks[1])
+
+        self.assertIsInstance(model.conv2, nn.Conv2d)
+        self.assertEqual(model.conv2.in_channels, m_channels)
+        self.assertEqual(model.conv2.out_channels, m_channels)
+        self.assertEqual(model.conv2.stride, (2, 1))
+
+        expected_out_channels = m_channels * (feat_dim // 8)
+        self.assertEqual(model.out_channels, expected_out_channels)
+
+    def test_forward_pass(self):
+        from campplus_model import FCM, BasicResBlock
+        import torch
+
+        m_channels = 32
+        feat_dim = 80
+        num_blocks = [2, 2]
+        batch_size = 2
+        seq_len = 200
+
+        model = FCM(block=BasicResBlock, num_blocks=num_blocks, m_channels=m_channels, feat_dim=feat_dim)
+        model.eval()
+
+        # In CAMPPlus, the input to FCM is permuted from (B, T, F) to (B, F, T)
+        x = torch.randn(batch_size, feat_dim, seq_len)
+        output = model(x)
+
+        self.assertIsInstance(output, torch.Tensor)
+        expected_out_channels = m_channels * (feat_dim // 8)
+        self.assertEqual(output.shape, (batch_size, expected_out_channels, seq_len))
+
+
 if __name__ == '__main__':
     unittest.main()
