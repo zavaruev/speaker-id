@@ -25,6 +25,7 @@ echo "🐍 Создаем app.py..."
 cat << 'EOF' > speaker_id/app.py
 import os
 import tempfile
+import anyio
 import torch
 import torchaudio
 import numpy as np
@@ -96,7 +97,7 @@ async def identify(file: UploadFile = File(...)):
         
     try:
         file_size = 0
-        with open(temp_path, "wb") as buffer:
+        async with await anyio.open_file(temp_path, "wb") as buffer:
             while True:
                 chunk = await file.read(1024 * 1024)
                 if not chunk:
@@ -104,7 +105,7 @@ async def identify(file: UploadFile = File(...)):
                 file_size += len(chunk)
                 if file_size > MAX_FILE_SIZE:
                     raise HTTPException(status_code=413, detail=f"File exceeds {MAX_FILE_SIZE // (1024*1024)}MB limit")
-                await run_in_threadpool(buffer.write, chunk)
+                await buffer.write(chunk)
 
         signal, fs = torchaudio.load(temp_path)
         embeddings = classifier.encode_batch(signal)
@@ -145,7 +146,7 @@ async def enroll(user_id: str = Form(...), file: UploadFile = File(...)):
         
     try:
         file_size = 0
-        with open(temp_path, "wb") as buffer:
+        async with await anyio.open_file(temp_path, "wb") as buffer:
             while True:
                 chunk = await file.read(1024 * 1024)
                 if not chunk:
@@ -153,7 +154,7 @@ async def enroll(user_id: str = Form(...), file: UploadFile = File(...)):
                 file_size += len(chunk)
                 if file_size > MAX_FILE_SIZE:
                     raise HTTPException(status_code=413, detail=f"File exceeds {MAX_FILE_SIZE // (1024*1024)}MB limit")
-                await run_in_threadpool(buffer.write, chunk)
+                await buffer.write(chunk)
 
         signal, fs = torchaudio.load(temp_path)
         embeddings = classifier.encode_batch(signal)

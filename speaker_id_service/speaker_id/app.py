@@ -4,6 +4,7 @@ os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
 import uuid
 import sys
 import tempfile
+import anyio
 sys.path.insert(0, "/app")
 import torch
 import torchaudio
@@ -152,7 +153,7 @@ async def identify(file: UploadFile = File(...)):
     
     try:
         file_size = 0
-        with open(temp_input, "wb") as buffer:
+        async with await anyio.open_file(temp_input, "wb") as buffer:
             while True:
                 chunk = await file.read(1024 * 1024)
                 if not chunk:
@@ -160,7 +161,7 @@ async def identify(file: UploadFile = File(...)):
                 file_size += len(chunk)
                 if file_size > MAX_FILE_SIZE:
                     raise HTTPException(status_code=413, detail=f"File exceeds {MAX_FILE_SIZE // (1024*1024)}MB limit")
-                await run_in_threadpool(buffer.write, chunk)
+                await buffer.write(chunk)
 
         if not convert_to_wav(temp_input, temp_wav):
             raise HTTPException(status_code=500, detail="Failed to process audio format")
@@ -956,7 +957,7 @@ async def enroll(user_id: str = Form(...), files: list[UploadFile] = File(...)):
             temp_files.extend([temp_input, temp_wav])
             
             file_size = 0
-            with open(temp_input, "wb") as buffer:
+            async with await anyio.open_file(temp_input, "wb") as buffer:
                 while True:
                     chunk = await file.read(1024 * 1024)
                     if not chunk:
@@ -964,7 +965,7 @@ async def enroll(user_id: str = Form(...), files: list[UploadFile] = File(...)):
                     file_size += len(chunk)
                     if file_size > MAX_FILE_SIZE:
                         raise HTTPException(status_code=413, detail=f"File exceeds {MAX_FILE_SIZE // (1024*1024)}MB limit")
-                    await run_in_threadpool(buffer.write, chunk)
+                    await buffer.write(chunk)
 
             if not convert_to_wav(temp_input, temp_wav):
                 raise HTTPException(status_code=500, detail="Failed to process audio format")
