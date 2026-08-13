@@ -217,3 +217,17 @@ def test_rebuild_cache_partial_failure(mock_stack, mock_normalize, mock_tensor, 
     assert mock_tensor.call_count == 1
     assert mock_normalize.call_count == 1
     mock_stack.assert_called_once_with([mock_norm_obj])
+
+@patch("app.MAX_FILE_SIZE", 1024)
+def test_identify_file_size_limit():
+    """Test that uploading a file larger than MAX_FILE_SIZE returns 413"""
+    # Generate a payload larger than the patched limit
+    large_content = b"0" * 2048
+
+    response = client.post(
+        "/identify",
+        files={"file": ("large_file.wav", large_content, "audio/wav")}
+    )
+
+    assert response.status_code == 413
+    assert "File exceeds" in response.json()["detail"]
