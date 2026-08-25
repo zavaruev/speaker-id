@@ -27,6 +27,7 @@ import torch.nn.functional as F
 class TAP(nn.Module):
     """
     Temporal average pooling, only first-order mean is considered
+    (x: (B, F, T) -> (B, F); the simplest possible utterance summarizer).
     """
 
     def __init__(self, in_dim=0, **kwargs):
@@ -47,6 +48,7 @@ class TAP(nn.Module):
 class TSDP(nn.Module):
     """
     Temporal standard deviation pooling, only second-order std is considered
+    (captures within-utterance variability per channel instead of the mean).
     """
 
     def __init__(self, in_dim=0, **kwargs):
@@ -67,13 +69,15 @@ class TSDP(nn.Module):
 class TSTP(nn.Module):
     """
     Temporal statistics pooling, concatenate mean and std, which is used in
-    x-vector
-    Comment: simple concatenation can not make full use of both statistics
+    x-vector. Comment: simple concatenation can not make full use of both
+    statistics — but it doubles the feature dim only once and needs no learned
+    parameters, which is why CAMPPlus ships with it by default.
+    Output dim = 2 * in_dim.
     """
 
     def __init__(self, in_dim=0, **kwargs):
         super(TSTP, self).__init__()
-        self.in_dim = in_dim
+        self.in_dim = in_dim  # kept for get_out_dim(); pooling itself is parameter-free
 
     def forward(self, x):
         # The last dimension is the temporal axis
@@ -92,6 +96,10 @@ class TSTP(nn.Module):
 class ASTP(nn.Module):
     """ Attentive statistics pooling: Channel- and context-dependent
         statistics pooling, first used in ECAPA_TDNN.
+
+    A tiny attention net predicts per-frame weights alpha; frames are then
+    summarized as alpha-weighted mean/std instead of flat averages, so the
+    network learns WHICH frames matter (e.g. voiced, clean ones).
     """
 
     def __init__(self,
@@ -127,6 +135,8 @@ class ASTP(nn.Module):
         assert len(x.shape) == 3
 
         if self.global_context_att:
+            # Feed global mean/std alongside each frame so attention can be
+            # context-aware (triples the input channels of linear1).
             context_mean = torch.mean(x, dim=-1, keepdim=True).expand_as(x)
             context_std = torch.sqrt(
                 torch.var(x, dim=-1, keepdim=True) + 1e-7).expand_as(x)
@@ -134,10 +144,13 @@ class ASTP(nn.Module):
         else:
             x_in = x
 
-        # DON'T use ReLU here! ReLU may be hard to converge.
+        # DON'T use ReLU here! ReLU would zero out half the bottleneck and
+        # empirically hurts convergence; tanh keeps signed information.
         alpha = torch.tanh(
             self.linear1(x_in))  # alpha = F.relu(self.linear1(x_in))
+        # Softmax over TIME: alpha now sums to 1 across frames per channel.
         alpha = torch.softmax(self.linear2(alpha), dim=2)
+        # Weighted mean and E[x^2]-mean^2 trick for the weighted std.
         mean = torch.sum(alpha * x, dim=2)
         var = torch.sum(alpha * (x**2), dim=2) - mean**2
         std = torch.sqrt(var.clamp(min=1e-7))
@@ -150,7 +163,10 @@ class ASTP(nn.Module):
 
 class ASP(nn.Module):
     """Attentive Statistics Pooling (compatible with WeSpeaker and
-    W2V-BERT/WavLM)."""
+    W2V-BERT/WavLM). Same weighted mean/std idea as ASTP with a Conv-ReLU-BN-
+    Conv-Softmax attention head; accepts several input layouts and normalizes
+    them internally.
+    """
 
     def __init__(
         self,
@@ -248,9 +264,13 @@ class MHASTP(torch.nn.Module):
 
     def forward(self, input):
         """
-        input: a 3-dimensional tensor in xvector architecture
-            or a 4-dimensional tensor in resnet architecture
+        input: a 3-dimensional tensor in tdnn-based architecture (B,F,T)
+            or a 4-dimensional tensor in resnet architecture (B,C,F,T)
             0-dim: batch-dimension, last-dim: time-dimension (frame-dimension)
+
+        Each head attends over its own slice of channels; per-head mean/std
+        pairs are concatenated, so output dim = heads * 2 * (in_dim/heads) =
+        2 * in_dim regardless of head_num.
         """
         if len(input.shape) == 4:  # B x F x T
             input = input.reshape(input.shape[0],

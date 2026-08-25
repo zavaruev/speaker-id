@@ -27,9 +27,9 @@
 | GET | `/enroll` | — | HTML form |
 | POST | `/enroll` | `user_id` (form) + `files` (multiple UploadFile) + header `X-API-Key` | `{ status, user_id }` |
 
-`/enroll` requires `X-API-Key` (env `API_KEY`, fallback `default_secret_key`); the inline UI has a key field, `enroll_client.sh` does not send it (401). `user_id` must match `^[a-zA-Z0-9_-]+$`; max 50 files (`MAX_FILES`).
+`/enroll` requires `X-API-Key` (env `API_KEY`). Since compose passes `API_KEY=${API_KEY:?API_KEY_missing_in_dotenv}`, the container always has it set — deployments fail fast at `docker compose up` when `.env` is missing. The in-app `os.environ.get("API_KEY")` fallback (reject everything when unset) only matters for bare `python3 app.py` dev runs. The inline UI has a key field; `enroll_client.sh` sends it from `SPEAKER_ID_API_KEY` or prompts. `user_id` must match `^[a-zA-Z0-9_-]+$`; max 50 files (`MAX_FILES`).
 
-Multiple audio samples are average-embedded into one `.npy`. Upload temp files use `tempfile.NamedTemporaryFile` + `anyio.open_file`; `convert_to_wav` is async (`asyncio.create_subprocess_exec`); cleanup via `run_in_threadpool(_safe_remove, ...)`; `torchaudio.load` via `run_in_threadpool`. TLS is opt-in via `SSL_KEYFILE`/`SSL_CERTFILE`.
+Multiple audio samples are average-embedded into one `.npy`. Upload temp files use `tempfile.NamedTemporaryFile` + `anyio.open_file`; `convert_to_wav` is async (`asyncio.create_subprocess_exec`); cleanup via `run_in_threadpool(_safe_remove, ...)`; `torchaudio.load` via `run_in_threadpool`. Embedding persistence writes the temp file INSIDE `SPEAKERS_DIR` and publishes via `os.replace` so the rename is atomic on the same filesystem (a `/tmp` staging path would cross devices and lose that guarantee). TLS is opt-in via `SSL_KEYFILE`/`SSL_CERTFILE`.
 
 ## Developer Commands
 
@@ -44,6 +44,8 @@ GPU: NVIDIA with CUDA 11.8 (Pascal+). Container runs `nvidia` device driver rese
 
 ## Env vars
 
+- `.env` next to `docker-compose.yaml`: `API_KEY=<secret>` — REQUIRED; compose fails without it
 - `docker-compose.yaml`: `HF_TOKEN=0`, `HF_HUB_VERBOSITY=error` — suppress HuggingFace noise
 - Set in `app.py` via `os.environ`: `HF_HUB_DISABLE_SYMLINKS_WARNING=1`, `HF_HUB_DISABLE_PROGRESS_BARS=1`
 - Minimum audio: 4000 samples (~0.25s at 16kHz)
+- Known quirk: `compute_fbank` uses `dither=1.0` (Kaldi's int16-scale convention) while inputs are peak-normalized floats — torchaudio adds N(0,1)-scale noise, making embeddings slightly non-deterministic (~0.05 cosine jitter on identical input measured). Candidate fix: `dither=0.0`; needs owner sign-off because accuracy figures were tuned against current behavior.

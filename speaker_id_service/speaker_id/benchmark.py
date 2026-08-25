@@ -1,3 +1,13 @@
+"""Micro-benchmark: blocking vs non-blocking upload handling under concurrency.
+
+Simulates N concurrent requests each writing a large upload to disk, comparing
+(a) naive blocking `open()`/`shutil.copyfileobj` inside async handlers against
+(b) `run_in_threadpool`-offloaded writes. A ticker task measures event-loop lag
+so you can see how long the loop is starved by disk I/O. This is the rationale
+behind the anyio/threadpool patterns used in app.py.
+
+Run inside the container:  python benchmark.py
+"""
 import asyncio
 import time
 import shutil
@@ -8,10 +18,12 @@ import os
 from fastapi.concurrency import run_in_threadpool
 
 def create_large_file(path, size_mb=10):
+    """Write a random blob of size_mb MB to path (random bytes defeat caching)."""
     with open(path, "wb") as f:
         f.write(os.urandom(size_mb * 1024 * 1024))
 
 async def simulate_concurrent_requests_blocking(upload_files):
+    """Worst case: synchronous writes run directly on the event loop."""
     async def process_blocking(file: UploadFile):
         temp_input = tempfile.mktemp()
         # Blocking I/O
@@ -26,6 +38,7 @@ async def simulate_concurrent_requests_blocking(upload_files):
     return time.perf_counter() - start_time
 
 async def simulate_concurrent_requests_nonblocking(upload_files):
+    """Production pattern: identical write offloaded to a worker thread."""
     def save_file(src, dest):
         with open(dest, "wb") as buffer:
             shutil.copyfileobj(src, buffer)
@@ -43,7 +56,8 @@ async def simulate_concurrent_requests_nonblocking(upload_files):
     return time.perf_counter() - start_time
 
 async def measure_event_loop_lag(coro_func, upload_files):
-    # We run a background task that ticks every 10ms and measures the max delay
+    # We run a background task that ticks every 10ms and measures the max delay;
+    # a lagging ticker means some handler blocked the loop for that long.
     max_delay = 0
     keep_running = True
 

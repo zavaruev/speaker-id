@@ -1,3 +1,13 @@
+"""Micro-benchmark: realistic-size embeddings (512-dim), many concurrent saves.
+
+Like benchmark_enroll.py but with production-shaped payloads and an added
+50 ms simulated latency per request; shows that at realistic embedding sizes
+the blocking-vs-threadpool difference is small — threadpool offloading is kept
+anyway to guarantee the event loop stays responsive regardless of payload or
+disk speed.
+
+Run inside the container:  python benchmark_enroll2.py
+"""
 import asyncio
 import time
 import numpy as np
@@ -8,7 +18,8 @@ import os
 from pathlib import Path
 from fastapi.concurrency import run_in_threadpool
 
-# Mock constants
+# Mock constants — stand-in for the real SPEAKERS_DIR so the benchmark never
+# touches actual enrolled voices.
 SPEAKERS_DIR = Path("/tmp/speakers_mock")
 SPEAKERS_DIR.mkdir(parents=True, exist_ok=True)
 

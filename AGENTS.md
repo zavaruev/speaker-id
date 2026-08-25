@@ -23,20 +23,16 @@ docker compose up --build
 
 No pytest config, no pytest/torch in `requirements.txt` — pytest is not installed in the image.
 
-Test code is duplicated across **three** locations (all variants of `test_campplus_model.py` / `test_pooling_layers.py` exist in several):
+Test code lives in **one** tracked location: `speaker_id_service/speaker_id/tests/` (`test_app.py`, `test_path_traversal.py`, `test_security.py`, `test_campplus_model.py`, `test_pooling_layers.py`, `test_benchmark.py`). The older duplicate copies (`speaker_id_service/tests/`, repo-root `tests/`) were removed from git — those directories now hold only stale `__pycache__` artifacts and can be deleted.
 
-- `speaker_id_service/speaker_id/tests/` — main suite (`test_app.py`, `test_path_traversal.py`, `test_security.py`, `test_campplus_model.py`, `test_pooling_layers.py`)
-- `speaker_id_service/tests/test_campplus_model.py` — imports via `../speaker_id`
-- `tests/test_campplus_model.py` (repo root) — imports `speaker_id_service.speaker_id.campplus_model`
-
-Run the suite inside the container (only `speaker_id/` contents are copied into the image, so the two outer test dirs aren't available there):
+Run the suite inside the container (only `speaker_id/` contents are copied into the image, so nothing else is available there):
 
 ```bash
-docker compose exec speaker_id pip install pytest pytest-asyncio httpx2
+docker compose exec speaker_id pip install pytest pytest-asyncio httpx
 docker compose exec speaker_id python -m pytest tests -q
 ```
 
-(`httpx2` is required by starlette's `TestClient`; `pytest-asyncio` for the async `convert_to_wav` tests — neither is in `requirements.txt`.)
+(`httpx` is required by starlette's `TestClient`; `pytest-asyncio` for the async `convert_to_wav` tests — neither is in `requirements.txt`.)
 
 App tests (`test_app.py`, `test_security.py`, `test_path_traversal.py`) mock `torch`/`torchaudio` into `sys.modules` *before* importing `app` — don't remove that mocking or they'll try to load the real model. Since `convert_to_wav` is now async, those tests patch it with `unittest.mock.AsyncMock` — preserve that. **Important:** `test_app.py` must restore the real modules in `sys.modules` right after `import app` (and `test_security.py` must scope its `patch()`s to the import) — otherwise later pooling/model tests import the mocked `torch` and fail with `StopIteration`. Model/pooling tests need real torch, so they only run where torch is installed (container or a CUDA-capable host env).
 

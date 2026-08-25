@@ -36,6 +36,12 @@ import pooling_layers
 
 
 def get_nonlinear(config_str, channels):
+    """Build a small activation stack from a hyphen-separated config string.
+
+    E.g. 'batchnorm-relu' -> BatchNorm1d followed by ReLU. Used everywhere in
+    this file so layer configs stay declarative; unknown tokens raise to catch
+    typos early.
+    """
     nonlinear = nn.Sequential()
     for name in config_str.split('-'):
         if name == 'relu':
@@ -53,6 +59,11 @@ def get_nonlinear(config_str, channels):
 
 
 class TDNNLayer(nn.Module):
+    """Time-Delay Neural Network layer: dilated Conv1d over the time axis
+    followed by the configurable activation stack (default batchnorm-relu).
+    Convolutions with kernel_size > 1 give each frame a temporal context window,
+    which is what makes a TDNN 'time-delay'.
+    """
 
     def __init__(self,
                  in_channels,
@@ -64,6 +75,8 @@ class TDNNLayer(nn.Module):
                  bias=False,
                  config_str='batchnorm-relu'):
         super(TDNNLayer, self).__init__()
+        # Negative padding means 'compute symmetric padding from kernel size';
+        # requires an odd kernel so both sides get equal context.
         if padding < 0:
             assert kernel_size % 2 == 1, 'Expect equal paddings, \
                     but got even kernel size ({})'.format(kernel_size)
@@ -84,6 +97,14 @@ class TDNNLayer(nn.Module):
 
 
 class CAMLayer(nn.Module):
+    """Context-Aware Masking block — the core novelty of CAM++.
+
+    A local branch (linear_local) extracts frame-level features while a global
+    branch squeezes the whole utterance (global mean + segmented pooling) into
+    a channel attention mask via a bottleneck (linear1 -> ReLU -> linear2 ->
+    sigmoid). The mask multiplicatively gates the local features, letting every
+    frame attend to utterance-level context cheaply.
+    """
 
     def __init__(self,
                  bn_channels,
@@ -108,13 +129,17 @@ class CAMLayer(nn.Module):
         self.sigmoid = nn.Sigmoid()
 
     def forward(self, x):
+        # Accept (B, C, T) or bare (C, T); remember if we had to add a batch dim
+        # so the output shape matches the input convention.
         is_2d = False
         if len(x.shape) == 2:
             x = x.unsqueeze(0)
             is_2d = True
 
         y = self.linear_local(x)
+        # Global context = plain mean over time + coarse segment statistics.
         context = x.mean(-1, keepdim=True) + self.seg_pooling(x)
+        # Bottleneck: squeeze -> nonlinearity -> per-channel gate in [0, 1].
         context = self.relu(self.linear1(context))
         m = self.sigmoid(self.linear2(context))
         out = y * m
@@ -124,6 +149,12 @@ class CAMLayer(nn.Module):
         return out
 
     def seg_pooling(self, x, seg_len: int = 100, stype: str = 'avg'):
+        """Segment-level pooling: split time into ~seg_len-frame chunks and
+        broadcast each chunk statistic back across its frames. This gives the
+        CAM gate a multi-scale view of the utterance beyond the single global
+        mean. ceil_mode ensures trailing partial segments are kept; the result
+        is trimmed back to the original length at the end.
+        """
         if stype == 'avg':
             seg = F.avg_pool1d(x,
                                kernel_size=seg_len,
@@ -145,6 +176,12 @@ class CAMLayer(nn.Module):
 
 
 class CAMDenseTDNNLayer(nn.Module):
+    """One DenseNet-style TDNN layer with a CAM gate.
+
+    Pre-activation pattern: BN-ReLU -> 1x1 conv to a bottleneck width
+    (bn_channels) -> BN-ReLU -> CAMLayer projecting to out_channels. The odd
+    kernel size is asserted so 'same' padding keeps the time resolution.
+    """
 
     def __init__(self,
                  in_channels,
@@ -180,6 +217,13 @@ class CAMDenseTDNNLayer(nn.Module):
 
 
 class CAMDenseTDNNBlock(nn.ModuleList):
+    """A stack of CAMDenseTDNNLayers with growing receptive fields.
+
+    True to DenseNet style, each layer's output is CONCATENATED with its input
+    (torch.cat on the channel dim), so channels grow by out_channels per layer
+    — the caller tracks `channels + num_layers * growth_rate` after the block.
+    Layer i therefore receives in_channels + i * out_channels inputs.
+    """
 
     def __init__(self,
                  num_layers,
@@ -205,12 +249,17 @@ class CAMDenseTDNNBlock(nn.ModuleList):
             self.add_module('tdnnd%d' % (i + 1), layer)
 
     def forward(self, x):
+        # Dense connectivity: preserve earlier features and append every new one.
         for layer in self:
             x = torch.cat([x, layer(x)], dim=1)
         return x
 
 
 class TransitLayer(nn.Module):
+    """Projection layer between dense blocks: compresses the accumulated
+    (linearly grown) channel count down by half via a 1x1 convolution, keeping
+    the network's width manageable.
+    """
 
     def __init__(self,
                  in_channels,
@@ -228,6 +277,10 @@ class TransitLayer(nn.Module):
 
 
 class DenseLayer(nn.Module):
+    """Final 1x1-conv projection (with activation) from pooled statistics to
+    the embedding. Supports 2-D input (features,) by treating it as a single
+    time step.
+    """
 
     def __init__(self,
                  in_channels,
@@ -252,6 +305,12 @@ class DenseLayer(nn.Module):
 
 
 class BasicResBlock(nn.Module):
+    """Standard two-conv residual block over a (B, C, F, T) feature map.
+
+    Strides only along the frequency axis (stride=(stride, 1)) because time
+    resolution is precious for speaker features; a 1x1-conv shortcut matches
+    shapes when downsampling or changing width.
+    """
     expansion = 1
 
     def __init__(self, in_planes, planes, stride=1):
@@ -289,6 +348,14 @@ class BasicResBlock(nn.Module):
 
 
 class FCM(nn.Module):
+    """Front-end Feature Extraction / 'FCM' head.
+
+    Maps the (B, T, 80) log-Mel input (channel dim added in forward) through a
+    small ResNet over the freq×time plane, downsampling frequency by 8 total
+    while keeping time intact, then flattens (C, F') into channels so the rest
+    of the network can work as plain Conv1d over time. With feat_dim=80 and
+    m_channels=32 the output has 32 * (80 // 8) = 320 channels per frame.
+    """
 
     def __init__(self, block, num_blocks, m_channels=32, feat_dim=80):
         super(FCM, self).__init__()
@@ -328,18 +395,27 @@ class FCM(nn.Module):
         return nn.Sequential(*layers)
 
     def forward(self, x):
-        x = x.unsqueeze(1)
+        x = x.unsqueeze(1)  # (B, T, F) -> (B, 1, T, F): single input channel
         out = F.relu(self.bn1(self.conv1(x)))
         out = self.layer1(out)
         out = self.layer2(out)
         out = F.relu(self.bn2(self.conv2(out)))
 
         shape = out.shape
+        # Merge channel x frequency into one axis -> (B, C*F', T).
         out = out.reshape(shape[0], shape[1] * shape[2], shape[3])
         return out
 
 
 class CAMPPlus(nn.Module):
+    """CAM++ speaker embedding extractor (Wang et al., arXiv:2303.00332).
+
+    Topology: FCM front-end -> TDNN stem -> three CAMDenseTDNNBlocks (12/24/16
+    layers, each followed by a halving TransitLayer) -> temporal statistics
+    pooling (TSTP by default) -> DenseLayer projection to embed_dim (512).
+    Input is (B, T, num_mel_bins), output is (B, embed_dim) utterance-level
+    embeddings ready for cosine scoring.
+    """
 
     def __init__(self,
                  feat_dim=80,
@@ -351,14 +427,18 @@ class CAMPPlus(nn.Module):
                  config_str='batchnorm-relu'):
         super(CAMPPlus, self).__init__()
 
+        # Front-end ResNet; determines the channel width fed to the TDNN stem.
         self.head = FCM(block=BasicResBlock,
                         num_blocks=[2, 2],
                         feat_dim=feat_dim)
         channels = self.head.out_channels
 
+        # Backbone: stem TDNN + dense CAM blocks + transit projections.
         self.xvector, channels = self._build_xvector(
             channels, init_channels, growth_rate, bn_size, config_str)
 
+        # Pooling resolves by name from pooling_layers (e.g. 'TSTP', 'ASTP');
+        # doubling by stats means the dense layer sees 2*channels inputs.
         self.pool = getattr(pooling_layers, pooling_func)(in_dim=channels)
         self.pool_out_dim = self.pool.get_out_dim()
         self.xvector.add_module('stats', self.pool)
@@ -369,6 +449,10 @@ class CAMPPlus(nn.Module):
         self._init_weights()
 
     def _build_xvector(self, channels, init_channels, growth_rate, bn_size, config_str):
+        """Assemble stem + blocks + transits as an OrderedDict-based Sequential
+        so checkpoint keys stay stable ('tdnn', 'block1', 'transit1', ...).
+        Each block adds num_layers*growth_rate channels; each transit halves.
+        """
         xvector = nn.Sequential(
             OrderedDict([
                 ('tdnn',
@@ -392,7 +476,7 @@ class CAMPPlus(nn.Module):
                                       dilation=dilation,
                                       config_str=config_str)
             xvector.add_module('block%d' % (i + 1), block)
-            channels = channels + num_layers * growth_rate
+            channels = channels + num_layers * growth_rate  # dense concatenation growth
             xvector.add_module(
                 'transit%d' % (i + 1),
                 TransitLayer(channels,
@@ -407,6 +491,8 @@ class CAMPPlus(nn.Module):
         return xvector, channels
 
     def _init_weights(self):
+        """Kaiming-init all convs/linears (zero biases). BatchNorm layers keep
+        their PyTorch defaults."""
         for m in self.modules():
             if isinstance(m, (nn.Conv1d, nn.Linear)):
                 nn.init.kaiming_normal_(m.weight.data)
@@ -414,7 +500,8 @@ class CAMPPlus(nn.Module):
                     nn.init.zeros_(m.bias)
 
     def forward(self, x):
-        x = x.permute(0, 2, 1)  # (B,T,F) => (B,F,T)
+        """(B, T, F) fbank batch -> (B, embed_dim) utterance embeddings."""
+        x = x.permute(0, 2, 1)  # (B,T,F) => (B,F,T): Conv1d wants channels first
         x = self.head(x)
         x = self.xvector(x)
         return x

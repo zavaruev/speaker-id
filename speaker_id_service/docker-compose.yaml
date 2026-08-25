@@ -4,26 +4,36 @@ services:
       context: ./speaker_id
       dockerfile: Dockerfile
     container_name: speaker_id_service
-    dns:
+    dns:                      # explicit resolvers: HF download inside corp networks
       - 8.8.8.8
       - 1.1.1.1
     ports:
       - "8001:8001"
     environment:
-      - HF_TOKEN=0
-      - HF_HUB_VERBOSITY=error
+      - HF_TOKEN=0                    # silence HuggingFace auth warnings
+      - HF_HUB_VERBOSITY=error        # quiet model-download logs
+      # REQUIRED: interpolated from .env next to this file. The ':?' form makes
+      # `docker compose up` fail fast with 'API_KEY_missing_in_dotenv' instead
+      # of silently enrolling voices with no/weak key.
+      - API_KEY=${API_KEY:?API_KEY_missing_in_dotenv}
     volumes:
+      # Checkpoint cache: survives rebuilds, avoids re-downloading 63 MB.
       - ./models/speaker_id:/app/models/speaker_id
+      # Enrolled voice profiles (*.npy) live on the host, outside the image.
       - ./speakers:/app/speakers
     deploy:
       resources:
         reservations:
           devices:
+            # Hand every GPU on the host to the container; needs
+            # nvidia-container-toolkit + CUDA 11.8-capable drivers (Pascal+).
             - driver: nvidia
               count: all
               capabilities: [gpu]
     restart: unless-stopped
     healthcheck:
+      # /health flips to 200 once the CAMPPlus checkpoint is loaded and warmed
+      # up; start_period covers first-start model download time.
       test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')"]
       interval: 30s
       timeout: 10s
