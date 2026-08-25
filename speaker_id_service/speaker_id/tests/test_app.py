@@ -350,3 +350,32 @@ def test_identify_gpu_fallback(mock_logger, mock_normalize, mock_fbank, mock_rem
         mock_cpu_model.assert_called_once_with(mock_fbank_tensor_cpu)
         mock_model.to.assert_called_once_with(app.device)
         mock_logger.warning.assert_called_with("GPU inference failed, falling back to CPU: OOM")
+
+
+@patch("os.remove")
+def test_safe_remove_success(mock_remove):
+    """Test successful file removal."""
+    app._safe_remove("test_path.txt")
+    mock_remove.assert_called_once_with("test_path.txt")
+
+
+@patch("os.remove")
+def test_safe_remove_file_not_found(mock_remove):
+    """Test that FileNotFoundError is gracefully ignored."""
+    mock_remove.side_effect = FileNotFoundError()
+    # The function should not raise an exception
+    app._safe_remove("test_path.txt")
+    mock_remove.assert_called_once_with("test_path.txt")
+
+
+@patch("os.remove")
+@patch("app.logger.warning")
+def test_safe_remove_exception(mock_logger_warning, mock_remove):
+    """Test that other exceptions are caught and logged."""
+    error_msg = "Permission denied"
+    mock_remove.side_effect = Exception(error_msg)
+
+    app._safe_remove("test_path.txt")
+
+    mock_remove.assert_called_once_with("test_path.txt")
+    mock_logger_warning.assert_called_once_with(f"Failed to remove test_path.txt: {error_msg}")
