@@ -73,13 +73,13 @@ API_KEY_NAME = "X-API-Key"
 api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
 
 async def get_api_key(api_key: str = Security(api_key_header)):
-    expected_api_key = os.environ.get("API_KEY", "default_secret_key")
-    if api_key == expected_api_key:
-        return api_key
-    raise HTTPException(
-        status_code=401,
-        detail="Invalid or missing API Key",
-    )
+    expected_api_key = os.environ.get("API_KEY")
+    if not expected_api_key or api_key != expected_api_key:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or missing API Key",
+        )
+    return api_key
 
 # Загружаем легковесную и точную модель от SpeechBrain
 logger.info("Загрузка модели SpeechBrain...")
