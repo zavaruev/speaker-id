@@ -350,3 +350,60 @@ def test_identify_gpu_fallback(mock_logger, mock_normalize, mock_fbank, mock_rem
         mock_cpu_model.assert_called_once_with(mock_fbank_tensor_cpu)
         mock_model.to.assert_called_once_with(app.device)
         mock_logger.warning.assert_called_with("GPU inference failed, falling back to CPU: OOM")
+
+@patch("builtins.open", new_callable=MagicMock)
+@patch("app.convert_to_wav", new_callable=AsyncMock)
+@patch("app.torchaudio.load")
+@patch("os.remove", return_value=None)
+@patch("app.compute_fbank")
+@patch("app.F.normalize")
+def test_identify_success(mock_normalize, mock_fbank, mock_remove, mock_load, mock_convert, mock_open):
+    """Test identify endpoint success path"""
+    mock_convert.return_value = True
+
+    mock_signal = MagicMock()
+    mock_signal.numel.return_value = 8000
+    mock_signal.shape = [1, 8000]
+    mock_signal.abs().max.return_value = 1.0
+    mock_signal.to.return_value = mock_signal
+    mock_load.return_value = (mock_signal, 16000)
+
+    mock_fbank.return_value = MagicMock()
+
+    # Create a mock for the resulting normalized embedding
+    mock_normalized = MagicMock()
+
+    # We need to mock the matmul operator `@`
+    # (embedding.squeeze(0) @ matrix.T).cpu().numpy()
+
+    # Create the mock that will be returned by .cpu()
+    mock_cpu_result = MagicMock()
+    # Create the mock that will be returned by .numpy()
+    import numpy as np
+    mock_cpu_result.numpy.return_value = np.array([0.9, 0.2])
+
+    # Create the mock that will be returned by `@`
+    mock_matmul_result = MagicMock()
+    mock_matmul_result.cpu.return_value = mock_cpu_result
+
+    # Configure the embedding mock's squeeze method to return an object with overloaded __matmul__
+    mock_squeeze_result = MagicMock()
+    mock_squeeze_result.__matmul__.return_value = mock_matmul_result
+    mock_normalized.squeeze.return_value = mock_squeeze_result
+
+    mock_normalize.return_value = mock_normalized
+
+    with patch("app.model") as mock_model, \
+         patch("app._embedding_names", ["user_1", "user_2"]), \
+         patch("app._embedding_matrix", MagicMock()), \
+         patch("app._rebuild_cache"):
+
+        mock_model.return_value = MagicMock()
+
+        response = client.post(
+            "/identify",
+            files={"file": ("test.wav", b"dummy content", "audio/wav")}
+        )
+
+        assert response.status_code == 200
+        assert response.json() == {"user_id": "user_1", "confidence": 0.9}
