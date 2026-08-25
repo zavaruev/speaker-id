@@ -59,7 +59,6 @@ def test_asp_forward_shape_4d():
 
 def test_asp_forward_values():
     """Test ASP forward mathematically with mocked attention."""
-    import unittest.mock
 
     input_dim = 2
     model = ASP(input_dim=input_dim)
