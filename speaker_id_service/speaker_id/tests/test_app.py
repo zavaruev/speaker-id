@@ -58,11 +58,11 @@ from fastapi import HTTPException
 
 @pytest.mark.asyncio
 async def test_get_api_key_valid_default():
-    """Test get_api_key returns the key when it matches the default API_KEY"""
+    """Test get_api_key raises 401 when API_KEY is unset (no hardcoded fallback since PR #79)"""
     with patch.dict(os.environ, clear=True):
-        # By default API_KEY is not set, so expected is "default_secret_key"
-        result = await app.get_api_key("default_secret_key")
-        assert result == "default_secret_key"
+        with pytest.raises(HTTPException) as exc_info:
+            await app.get_api_key("default_secret_key")
+        assert exc_info.value.status_code == 401
 
 @pytest.mark.asyncio
 async def test_get_api_key_valid_custom():
@@ -520,3 +520,32 @@ def test_compute_fbank_not_16k(mock_resample_class, mock_fbank):
     finally:
         if original_resampler is not None:
             app._resampler_16k = original_resampler
+
+
+@patch("os.remove")
+def test_safe_remove_success(mock_remove):
+    """Test successful file removal."""
+    app._safe_remove("test_path.txt")
+    mock_remove.assert_called_once_with("test_path.txt")
+
+
+@patch("os.remove")
+def test_safe_remove_file_not_found(mock_remove):
+    """Test that FileNotFoundError is gracefully ignored."""
+    mock_remove.side_effect = FileNotFoundError()
+    # The function should not raise an exception
+    app._safe_remove("test_path.txt")
+    mock_remove.assert_called_once_with("test_path.txt")
+
+
+@patch("os.remove")
+@patch("app.logger.warning")
+def test_safe_remove_exception(mock_logger_warning, mock_remove):
+    """Test that other exceptions are caught and logged."""
+    error_msg = "Permission denied"
+    mock_remove.side_effect = Exception(error_msg)
+
+    app._safe_remove("test_path.txt")
+
+    mock_remove.assert_called_once_with("test_path.txt")
+    mock_logger_warning.assert_called_once_with(f"Failed to remove test_path.txt: {error_msg}")
