@@ -131,6 +131,15 @@ def test_identify_empty_signal(mock_remove, mock_getsize, mock_load, mock_conver
     assert response.json() == {"detail": "Audio too short or empty"}
 
 
+def test_enroll_form_success():
+    """Test that the /enroll HTML form returns correctly."""
+    response = client.get("/enroll")
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "text/html; charset=utf-8"
+    assert b"<!DOCTYPE html>" in response.content
+    assert b"<title>Voice Enrollment | Speaker ID</title>" in response.content
+    assert b"form-group" in response.content
+
 @patch("app.shutil.copyfileobj")
 @patch("builtins.open", new_callable=MagicMock)
 @patch("app.convert_to_wav", new_callable=AsyncMock)
