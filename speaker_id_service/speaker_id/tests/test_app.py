@@ -21,6 +21,16 @@ sys.modules['campplus_model'] = MagicMock()
 import urllib.request
 _orig_urlretrieve = urllib.request.urlretrieve
 urllib.request.urlretrieve = MagicMock()
+import hashlib
+_orig_hashlib = hashlib.sha256
+_mock_sha256 = MagicMock()
+_mock_sha256.return_value.hexdigest.return_value = "07abeeb5150441995b51ea65c9ccc8feed78b33040012f1d2fad29a0e4f5b8d7"
+hashlib.sha256 = _mock_sha256
+
+import builtins
+_orig_open = builtins.open
+builtins.open = MagicMock()
+builtins.open.return_value.__enter__.return_value.read.side_effect = [b"", b""]
 
 import torch
 torch.load = MagicMock(return_value={})
@@ -35,6 +45,8 @@ for _mod in ('torch', 'torch.nn', 'torch.nn.functional', 'torchaudio',
              'torchaudio.compliance', 'torchaudio.compliance.kaldi', 'campplus_model'):
     sys.modules.pop(_mod, None)
 urllib.request.urlretrieve = _orig_urlretrieve
+hashlib.sha256 = _orig_hashlib
+builtins.open = _orig_open
 
 from fastapi.testclient import TestClient
 
