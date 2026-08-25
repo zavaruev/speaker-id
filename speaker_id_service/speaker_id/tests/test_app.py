@@ -54,6 +54,33 @@ client = TestClient(app.app)
 
 from unittest.mock import AsyncMock
 
+from fastapi import HTTPException
+
+@pytest.mark.asyncio
+async def test_get_api_key_valid_default():
+    """Test get_api_key returns the key when it matches the default API_KEY"""
+    with patch.dict(os.environ, clear=True):
+        # By default API_KEY is not set, so expected is "default_secret_key"
+        result = await app.get_api_key("default_secret_key")
+        assert result == "default_secret_key"
+
+@pytest.mark.asyncio
+async def test_get_api_key_valid_custom():
+    """Test get_api_key returns the key when it matches a custom API_KEY"""
+    with patch.dict(os.environ, {"API_KEY": "my_custom_secret_key"}):
+        result = await app.get_api_key("my_custom_secret_key")
+        assert result == "my_custom_secret_key"
+
+@pytest.mark.asyncio
+async def test_get_api_key_invalid():
+    """Test get_api_key raises HTTPException when API key is invalid"""
+    with patch.dict(os.environ, clear=True):
+        with pytest.raises(HTTPException) as exc_info:
+            await app.get_api_key("invalid_key")
+
+        assert exc_info.value.status_code == 401
+        assert exc_info.value.detail == "Invalid or missing API Key"
+
 @pytest.mark.asyncio
 @patch("app.asyncio.create_subprocess_exec")
 async def test_convert_to_wav_success(mock_create_subprocess_exec):
