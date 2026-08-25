@@ -350,3 +350,125 @@ def test_identify_gpu_fallback(mock_logger, mock_normalize, mock_fbank, mock_rem
         mock_cpu_model.assert_called_once_with(mock_fbank_tensor_cpu)
         mock_model.to.assert_called_once_with(app.device)
         mock_logger.warning.assert_called_with("GPU inference failed, falling back to CPU: OOM")
+
+
+@patch("app.kaldi.fbank")
+def test_compute_fbank_16k(mock_fbank):
+    """Test compute_fbank when sample rate is exactly 16000Hz."""
+    mock_signal = MagicMock()
+    mock_fbank_tensor = MagicMock()
+
+    # Setup for fbank - fbank.mean() and fbank.unsqueeze(0)
+    mock_mean_tensor = MagicMock()
+    mock_sub_tensor = MagicMock()
+    mock_unsqueeze_tensor = MagicMock()
+
+    mock_fbank_tensor.mean.return_value = mock_mean_tensor
+    mock_fbank_tensor.__sub__.return_value = mock_sub_tensor
+    mock_sub_tensor.unsqueeze.return_value = mock_unsqueeze_tensor
+
+    mock_fbank.return_value = mock_fbank_tensor
+
+    result = app.compute_fbank(mock_signal, 16000)
+
+    # Assert kaldi fbank was called with 16000 fs and original signal
+    mock_fbank.assert_called_once_with(
+        mock_signal, num_mel_bins=80, frame_length=25, frame_shift=10, dither=1.0, sample_frequency=16000
+    )
+
+    # Check tensor operations
+    mock_fbank_tensor.mean.assert_called_once_with(dim=0, keepdim=True)
+    mock_fbank_tensor.__sub__.assert_called_once_with(mock_mean_tensor)
+    mock_sub_tensor.unsqueeze.assert_called_once_with(0)
+
+    assert result == mock_unsqueeze_tensor
+
+
+@patch("app.kaldi.fbank")
+@patch("app.torchaudio.transforms.Resample")
+def test_compute_fbank_not_16k(mock_resample_class, mock_fbank):
+    """Test compute_fbank when sample rate is not 16000Hz and needs resampling."""
+    # Let's ensure _resampler_16k has a specific mock so we can test the behavior
+    # when its frequencies don't match.
+    original_resampler = getattr(app, '_resampler_16k', None)
+    dummy_resampler = MagicMock()
+    dummy_resampler.orig_freq = 0
+    dummy_resampler.new_freq = 0
+    app._resampler_16k = dummy_resampler
+
+    mock_signal = MagicMock()
+    mock_signal.device = "cuda:0"
+
+    # Mock the resampler instance and its .to() method
+    mock_resampler_instance = MagicMock()
+    mock_resampler_instance.orig_freq = 8000
+    mock_resampler_instance.new_freq = 16000
+    mock_resampler_instance_to = MagicMock()
+    mock_resampler_instance.to.return_value = mock_resampler_instance_to
+
+    # Calling the resampler on the signal returns a resampled signal
+    mock_resampled_signal = MagicMock()
+    mock_resampler_instance_to.return_value = mock_resampled_signal
+
+    mock_resample_class.return_value = mock_resampler_instance
+
+    # Mock fbank processing similar to the 16k test
+    mock_fbank_tensor = MagicMock()
+    mock_mean_tensor = MagicMock()
+    mock_sub_tensor = MagicMock()
+    mock_unsqueeze_tensor = MagicMock()
+
+    mock_fbank_tensor.mean.return_value = mock_mean_tensor
+    mock_fbank_tensor.__sub__.return_value = mock_sub_tensor
+    mock_sub_tensor.unsqueeze.return_value = mock_unsqueeze_tensor
+
+    mock_fbank.return_value = mock_fbank_tensor
+
+    try:
+        # Initializing _resampler_16k case
+        result = app.compute_fbank(mock_signal, 8000)
+
+        # Verify Resample initialized and moved to device
+        mock_resample_class.assert_called_once_with(8000, 16000)
+        mock_resampler_instance.to.assert_called_once_with("cuda:0")
+
+        # Verify resampler was called with original signal
+        mock_resampler_instance_to.assert_called_once_with(mock_signal)
+
+        # Verify kaldi fbank called with resampled signal and 16000 fs
+        mock_fbank.assert_called_once_with(
+            mock_resampled_signal, num_mel_bins=80, frame_length=25, frame_shift=10, dither=1.0, sample_frequency=16000
+        )
+
+        assert result == mock_unsqueeze_tensor
+        assert hasattr(app, '_resampler_16k')
+
+        # For testing reuse, we must ensure the mock that was placed into app._resampler_16k
+        # by the compute_fbank function (which is mock_resampler_instance_to) has the right properties
+        # so it doesn't trigger a re-initialization.
+        mock_resampler_instance_to.orig_freq = 8000
+        mock_resampler_instance_to.new_freq = 16000
+
+        # Test reuse of resampler
+        mock_resample_class.reset_mock()
+        mock_fbank.reset_mock()
+        mock_resampler_instance_to.reset_mock()
+
+        result2 = app.compute_fbank(mock_signal, 8000)
+
+        mock_resample_class.assert_not_called()  # Resampler class shouldn't be instanciated again
+        mock_resampler_instance_to.assert_called_once_with(mock_signal)
+        mock_fbank.assert_called_once_with(
+            mock_resampled_signal, num_mel_bins=80, frame_length=25, frame_shift=10, dither=1.0, sample_frequency=16000
+        )
+
+        # Test re-initialization of resampler if fs changes
+        mock_resample_class.reset_mock()
+        mock_resample_class.return_value = mock_resampler_instance
+
+        result3 = app.compute_fbank(mock_signal, 24000)
+        mock_resample_class.assert_called_once_with(24000, 16000)
+
+    finally:
+        if original_resampler is not None:
+            app._resampler_16k = original_resampler
