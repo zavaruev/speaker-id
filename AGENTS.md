@@ -28,11 +28,10 @@ Test code lives in **one** tracked location: `speaker_id_service/speaker_id/test
 Run the suite inside the container (only `speaker_id/` contents are copied into the image, so nothing else is available there):
 
 ```bash
-docker compose exec speaker_id pip install pytest pytest-asyncio httpx
 docker compose exec speaker_id python -m pytest tests -q
 ```
 
-(`httpx` is required by starlette's `TestClient`; `pytest-asyncio` for the async `convert_to_wav` tests — neither is in `requirements.txt`.)
+(Test deps — `pytest`, `pytest-asyncio`, `httpx` — are baked into the image via `requirements-dev.txt`, so no manual `pip install` is needed; they survive rebuilds.)
 
 App tests (`test_app.py`, `test_security.py`, `test_path_traversal.py`) mock `torch`/`torchaudio` into `sys.modules` *before* importing `app` — don't remove that mocking or they'll try to load the real model. Since `convert_to_wav` is now async, those tests patch it with `unittest.mock.AsyncMock` — preserve that. **Important:** `test_app.py` must restore the real modules in `sys.modules` right after `import app` (and `test_security.py` must scope its `patch()`s to the import) — otherwise later pooling/model tests import the mocked `torch` and fail with `StopIteration`. Model/pooling tests need real torch, so they only run where torch is installed (container or a CUDA-capable host env).
 

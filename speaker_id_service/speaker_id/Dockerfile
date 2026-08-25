@@ -21,6 +21,14 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 RUN pip install --no-cache-dir torch torchaudio --index-url https://download.pytorch.org/whl/cu118
 
+# Test dependencies travel with the image so the suite is always runnable:
+# `docker compose exec speaker_id python -m pytest tests -q` — no manual
+# pip installs needed after a rebuild. Placed AFTER the multi-GB torch layer
+# so it never invalidates that cache; only re-runs when requirements-dev.txt
+# itself changes.
+COPY requirements-dev.txt .
+RUN pip install --no-cache-dir -r requirements-dev.txt
+
 # Model + speakers dirs exist even on bare `docker run` without bind mounts;
 # with compose they are overlaid by volumes anyway.
 RUN mkdir -p /app/models/speaker_id /app/speakers

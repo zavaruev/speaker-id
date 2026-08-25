@@ -1,0 +1,8 @@
+# Test-only dependencies. Installed into the image on purpose: the whole
+# test suite runs inside the container (`docker compose exec speaker_id
+# python -m pytest tests -q`), and baking these in keeps it green across
+# rebuilds instead of requiring a manual `pip install` every time.
+# Combined size is a few MB — negligible next to the CUDA torch wheels.
+pytest
+pytest-asyncio
+httpx  # starlette TestClient backend required by tests/test_app.py

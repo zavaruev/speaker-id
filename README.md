@@ -235,9 +235,11 @@ so install it into the running container once and run:
 
 ```bash
 cd speaker_id_service
-docker compose exec speaker_id pip install -q pytest pytest-asyncio httpx
 docker compose exec speaker_id python -m pytest tests -q
 ```
+
+Test dependencies (`pytest`, `pytest-asyncio`, `httpx`) are already baked into the image via
+`requirements-dev.txt` — no manual `pip install` needed, they survive rebuilds.
 
 App/security/path-traversal tests mock out `torch`/`torchaudio`; model and pooling-layer tests
 need the real torch stack and therefore run inside the container (or on a CUDA-capable host).
