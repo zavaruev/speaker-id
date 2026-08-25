@@ -35,7 +35,7 @@ def _safe_remove(path: str):
     except FileNotFoundError:
         pass
     except Exception as e:
-        logger.warning(f"Failed to remove {path}: {e}")
+        logging.error(f"Failed to remove temp file {path}: {e}")
 
 for _logger in ["httpx", "urllib3", "filelock"]:
     logging.getLogger(_logger).setLevel(logging.ERROR)

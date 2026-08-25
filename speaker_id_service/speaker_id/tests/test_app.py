@@ -350,3 +350,28 @@ def test_identify_gpu_fallback(mock_logger, mock_normalize, mock_fbank, mock_rem
         mock_cpu_model.assert_called_once_with(mock_fbank_tensor_cpu)
         mock_model.to.assert_called_once_with(app.device)
         mock_logger.warning.assert_called_with("GPU inference failed, falling back to CPU: OOM")
+
+
+@patch("os.remove")
+def test_safe_remove_success(mock_remove):
+    """Test _safe_remove when os.remove succeeds."""
+    app._safe_remove("/tmp/test_file.wav")
+    mock_remove.assert_called_once_with("/tmp/test_file.wav")
+
+
+@patch("os.remove", side_effect=FileNotFoundError("Not found"))
+def test_safe_remove_file_not_found(mock_remove):
+    """Test _safe_remove when file does not exist."""
+    # Should not raise an exception
+    app._safe_remove("/tmp/test_file.wav")
+    mock_remove.assert_called_once_with("/tmp/test_file.wav")
+
+
+@patch("os.remove", side_effect=Exception("Permission denied"))
+@patch("app.logging")
+def test_safe_remove_exception(mock_logging, mock_remove):
+    """Test _safe_remove when an unexpected exception occurs."""
+    # Should not raise an exception, but should log an error
+    app._safe_remove("/tmp/test_file.wav")
+    mock_remove.assert_called_once_with("/tmp/test_file.wav")
+    mock_logging.error.assert_called_once_with("Failed to remove temp file /tmp/test_file.wav: Permission denied")
