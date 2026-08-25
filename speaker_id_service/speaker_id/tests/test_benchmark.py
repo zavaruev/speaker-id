@@ -1,6 +1,5 @@
 import os
 import tempfile
-import pytest
 from benchmark import create_large_file
 
 def test_create_large_file():
