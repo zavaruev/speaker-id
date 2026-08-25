@@ -22,7 +22,6 @@ from pathlib import Path
 import logging
 import shutil
 import uvicorn
-import subprocess
 import threading
 import re
 
