@@ -143,6 +143,9 @@ async def identify(file: UploadFile = File(...)):
         if os.path.exists(temp_path):
             await run_in_threadpool(_safe_remove, temp_path)
 
+def _save_embedding_setup(file_path: str, embedding_data: np.ndarray):
+    np.save(file_path, embedding_data)
+
 @app.post("/enroll", response_model=EnrollResponse)
 async def enroll(user_id: str = Form(...), file: UploadFile = File(...), api_key: str = Security(get_api_key)):
     """Регистрация нового голоса (создание слепка .npy)"""
@@ -172,7 +175,7 @@ async def enroll(user_id: str = Form(...), file: UploadFile = File(...), api_key
         signal, fs = await run_in_threadpool(torchaudio.load, temp_path)
         embeddings = classifier.encode_batch(signal)
         
-        np.save(SPEAKERS_DIR / f"{safe_user_id}.npy", embeddings.squeeze().cpu().numpy())
+        await run_in_threadpool(_save_embedding_setup, SPEAKERS_DIR / f"{safe_user_id}.npy", embeddings.squeeze().cpu().numpy())
         return EnrollResponse(status="success", user_id=safe_user_id)
     finally:
         if os.path.exists(temp_path):
