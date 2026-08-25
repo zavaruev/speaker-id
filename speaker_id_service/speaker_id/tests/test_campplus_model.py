@@ -8,7 +8,7 @@ import torch.nn as nn
 # Add the parent directory to the Python path to import campplus_model
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from campplus_model import CAMPPlus, get_nonlinear, DenseLayer
+from campplus_model import CAMPPlus, get_nonlinear, DenseLayer, CAMLayer
 
 def test_campplus_initialization():
     """Test that the CAMPPlus model initializes successfully with default/common parameters."""
@@ -294,3 +294,47 @@ def test_get_nonlinear_invalid_config():
         get_nonlinear('invalid_module', channels=64)
 
     assert "Unexpected module (invalid_module)" in str(exc_info.value)
+
+
+# -----------------
+# Tests for CAMLayer
+# -----------------
+
+def _make_cam_layer(bn_channels=16, out_channels=32):
+    return CAMLayer(bn_channels=bn_channels, out_channels=out_channels,
+                    kernel_size=3, stride=1, padding=1,
+                    dilation=1, bias=False)
+
+def test_cam_layer_initialization():
+    layer = _make_cam_layer(bn_channels=16, out_channels=32)
+    assert isinstance(layer, CAMLayer)
+    assert layer.linear_local.in_channels == 16
+    assert layer.linear_local.out_channels == 32
+    assert layer.linear_local.kernel_size[0] == 3
+
+def test_cam_layer_forward_3d_input():
+    layer = _make_cam_layer()
+    layer.eval()
+
+    batch_size, time_steps = 2, 50
+    x = torch.randn(batch_size, 16, time_steps)
+    out = layer(x)
+    assert out.shape == (batch_size, 32, time_steps)
+
+def test_cam_layer_forward_2d_input():
+    layer = _make_cam_layer()
+    layer.eval()
+
+    x = torch.randn(16, 50)
+    out = layer(x)
+    assert out.shape == (32, 50)
+
+def test_cam_layer_seg_pooling():
+    layer = _make_cam_layer()
+    x = torch.randn(2, 16, 50)
+
+    assert layer.seg_pooling(x, stype='avg').shape == (2, 16, 50)
+    assert layer.seg_pooling(x, stype='max').shape == (2, 16, 50)
+
+    with pytest.raises(ValueError):
+        layer.seg_pooling(x, stype='invalid')
