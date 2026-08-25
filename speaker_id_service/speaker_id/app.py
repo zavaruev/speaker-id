@@ -143,6 +143,11 @@ async def convert_to_wav(input_path: str, output_path: str) -> bool:
         logger.error("FFmpeg not installed in container! Run: apt-get install ffmpeg")
         return False
 
+def _save_embedding_and_rebuild(tmp_save: str, avg_embeddings_numpy: np.ndarray, final_path: str):
+    np.save(tmp_save, avg_embeddings_numpy)
+    shutil.move(tmp_save + ".npy", final_path)
+    _rebuild_cache()
+
 def _rebuild_cache():
     global _embedding_names, _embedding_matrix
     names = []
@@ -1027,9 +1032,9 @@ async def enroll(user_id: str = Form(...), files: list[UploadFile] = File(...), 
         avg_embeddings = F.normalize(avg_embeddings, p=2, dim=-1)
         # Atomic write: temp file + rename to prevent corruption on concurrent enrollment
         tmp_save = f"/tmp/.{uuid.uuid4()}"
-        np.save(tmp_save, avg_embeddings.numpy())
-        shutil.move(tmp_save + ".npy", str(SPEAKERS_DIR / f"{user_id}.npy"))
-        _rebuild_cache()
+        final_path = str(SPEAKERS_DIR / f"{user_id}.npy")
+        await run_in_threadpool(_save_embedding_and_rebuild, tmp_save, avg_embeddings.numpy(), final_path)
+
         logger.info(f"Voice enrolled: {user_id} ({len(files)} samples)")
         return EnrollResponse(status="success", user_id=user_id)
         
