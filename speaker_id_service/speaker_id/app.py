@@ -6,6 +6,7 @@ import sys
 import asyncio
 import tempfile
 import anyio
+import hashlib
 sys.path.insert(0, "/app")
 import torch
 import torchaudio
@@ -64,6 +65,18 @@ if not ckpt_path.exists():
     url = "https://huggingface.co/Wespeaker/wespeaker-voxceleb-campplus/resolve/main/avg_model.pt"
     logger.info(f"Downloading CAM++ from {url}")
     urllib.request.urlretrieve(url, str(ckpt_path))
+
+    expected_checksum = "07abeeb5150441995b51ea65c9ccc8feed78b33040012f1d2fad29a0e4f5b8d7"
+    sha256_hash = hashlib.sha256()
+    with open(ckpt_path, "rb") as f:
+        for byte_block in iter(lambda: f.read(4096), b""):
+            sha256_hash.update(byte_block)
+
+    if sha256_hash.hexdigest() != expected_checksum:
+        os.remove(ckpt_path)
+        logger.error("Model checksum verification failed.")
+        raise RuntimeError("Model checksum verification failed.")
+
 ckpt = torch.load(str(ckpt_path), map_location=device, weights_only=True)
 state_dict = {}
 for k, v in ckpt.items():
