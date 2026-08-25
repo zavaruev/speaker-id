@@ -211,7 +211,7 @@ async def identify(file: UploadFile = File(...)):
             matrix = _embedding_matrix
         
         if matrix is None:
-            _rebuild_cache()
+            await run_in_threadpool(_rebuild_cache)
             with _cache_lock:
                 names = _embedding_names
                 matrix = _embedding_matrix
@@ -1029,7 +1029,7 @@ async def enroll(user_id: str = Form(...), files: list[UploadFile] = File(...), 
         tmp_save = f"/tmp/.{uuid.uuid4()}"
         np.save(tmp_save, avg_embeddings.numpy())
         shutil.move(tmp_save + ".npy", str(SPEAKERS_DIR / f"{user_id}.npy"))
-        _rebuild_cache()
+        await run_in_threadpool(_rebuild_cache)
         logger.info(f"Voice enrolled: {user_id} ({len(files)} samples)")
         return EnrollResponse(status="success", user_id=user_id)
         
