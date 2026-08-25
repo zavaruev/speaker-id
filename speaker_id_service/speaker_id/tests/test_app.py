@@ -145,13 +145,12 @@ def test_health_not_ready():
     finally:
         app._model_ready = original_ready
 
-@patch("app.shutil.copyfileobj")
 @patch("builtins.open", new_callable=MagicMock)
 @patch("app.convert_to_wav", new_callable=AsyncMock, return_value=True)
 @patch("app.torchaudio.load")
 @patch("os.path.getsize", return_value=1024)
 @patch("os.remove", return_value=None)
-def test_identify_empty_signal(mock_remove, mock_getsize, mock_load, mock_convert, mock_open, mock_copy):
+def test_identify_empty_signal(mock_remove, mock_getsize, mock_load, mock_convert, mock_open):
     """Test identify endpoint handles empty/short audio signal"""
 
     # Mocking torch tensor shape since torch itself is mocked in this file
@@ -179,13 +178,12 @@ def test_enroll_form_success():
     assert b"<title>Voice Enrollment | Speaker ID</title>" in response.content
     assert b"form-group" in response.content
 
-@patch("app.shutil.copyfileobj")
 @patch("builtins.open", new_callable=MagicMock)
 @patch("app.convert_to_wav", new_callable=AsyncMock)
 @patch("app.torchaudio.load")
 @patch("os.path.getsize", return_value=1024)
 @patch("os.remove", return_value=None)
-def test_identify_path_traversal(mock_remove, mock_getsize, mock_load, mock_convert, mock_open, mock_copy):
+def test_identify_path_traversal(mock_remove, mock_getsize, mock_load, mock_convert, mock_open):
     """Test that path traversal in filenames is prevented"""
     mock_convert.return_value = False # fail early to avoid ML pipeline
 
@@ -201,13 +199,12 @@ def test_identify_path_traversal(mock_remove, mock_getsize, mock_load, mock_conv
     assert "../" not in open_args
     assert "/etc/" not in open_args
 
-@patch("app.shutil.copyfileobj")
 @patch("builtins.open", new_callable=MagicMock)
 @patch("app.convert_to_wav", new_callable=AsyncMock)
 @patch("app.torchaudio.load")
 @patch("os.path.getsize", return_value=1024)
 @patch("os.remove", return_value=None)
-def test_enroll_path_traversal(mock_remove, mock_getsize, mock_load, mock_convert, mock_open, mock_copy):
+def test_enroll_path_traversal(mock_remove, mock_getsize, mock_load, mock_convert, mock_open):
     """Test that path traversal in filenames is prevented in enroll"""
     mock_convert.return_value = False # fail early to avoid ML pipeline
 
