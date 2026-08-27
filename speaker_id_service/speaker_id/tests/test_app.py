@@ -146,6 +146,35 @@ def test_health_not_ready():
         app._model_ready = original_ready
 
 @patch("builtins.open", new_callable=MagicMock)
+@patch("app.convert_to_wav", new_callable=AsyncMock, return_value=False)
+@patch("os.remove", return_value=None)
+def test_identify_convert_failure(mock_remove, mock_convert, mock_open):
+    """Test that a failure in convert_to_wav raises a 500 error in /identify."""
+    response = client.post(
+        "/identify",
+        headers={"X-API-Key": "default_secret_key"},
+        files={"file": ("test.wav", b"dummy content", "audio/wav")}
+    )
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "Failed to process audio format"
+
+@patch("builtins.open", new_callable=MagicMock)
+@patch("app.convert_to_wav", new_callable=AsyncMock, return_value=False)
+@patch("os.remove", return_value=None)
+def test_enroll_convert_failure(mock_remove, mock_convert, mock_open):
+    """Test that a failure in convert_to_wav raises a 500 error in /enroll."""
+    response = client.post(
+        "/enroll",
+        headers={"X-API-Key": "default_secret_key"},
+        data={"user_id": "test_user"},
+        files=[("files", ("test.wav", b"dummy content", "audio/wav"))]
+    )
+
+    assert response.status_code == 500
+    assert response.json()["detail"] == "Failed to process audio format"
+
+@patch("builtins.open", new_callable=MagicMock)
 @patch("app.convert_to_wav", new_callable=AsyncMock, return_value=True)
 @patch("app.torchaudio.load")
 @patch("os.path.getsize", return_value=1024)
