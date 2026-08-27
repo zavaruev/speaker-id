@@ -234,7 +234,7 @@ async def convert_to_wav(input_path: str, output_path: str) -> bool:
         return False
 
 def _save_embedding_and_rebuild(tmp_save: str, avg_embeddings_numpy: np.ndarray, final_path: str):
-    """Persist an averaged embedding atomically, then refresh the gallery.
+    """Persist an averaged embedding atomically.
 
     np.save appends '.npy' to tmp_save. The temp file must live on the same
     filesystem as final_path (the caller creates it inside SPEAKERS_DIR) so
@@ -245,16 +245,9 @@ def _save_embedding_and_rebuild(tmp_save: str, avg_embeddings_numpy: np.ndarray,
     """
     np.save(tmp_save, avg_embeddings_numpy)
     os.replace(tmp_save + ".npy", final_path)
-    _rebuild_cache()
 
-def _rebuild_cache():
-    """Rescan SPEAKERS_DIR and restack all embeddings into the global matrix.
-
-    Called at import time is NOT required — identify lazily triggers a rebuild
-    when the matrix is still empty. Corrupted .npy files are skipped with a
-    warning instead of failing enrollment/identification wholesale.
-    """
-    global _embedding_names, _embedding_matrix
+def _load_all_embeddings_sync():
+    """Synchronous core for loading all embeddings. Returns names, matrix."""
     names = []
     tensors = []
     for speaker_file in sorted(SPEAKERS_DIR.glob("*.npy")):
@@ -265,9 +258,21 @@ def _rebuild_cache():
             tensors.append(t)
         except Exception as e:
             logger.warning(f"Skipping corrupted {speaker_file.name}: {e}")
+    matrix = torch.stack(tensors) if tensors else None
+    return names, matrix
+
+async def _rebuild_cache():
+    """Rescan SPEAKERS_DIR and restack all embeddings into the global matrix.
+
+    Called at import time is NOT required — identify lazily triggers a rebuild
+    when the matrix is still empty. Corrupted .npy files are skipped with a
+    warning instead of failing enrollment/identification wholesale.
+    """
+    global _embedding_names, _embedding_matrix
+    names, matrix = await run_in_threadpool(_load_all_embeddings_sync)
     with _cache_lock:
         _embedding_names = names
-        _embedding_matrix = torch.stack(tensors) if tensors else None
+        _embedding_matrix = matrix
 
 @app.post("/identify", response_model=IdentifyResponse)
 async def identify(file: UploadFile = File(...)):
@@ -339,7 +344,7 @@ async def identify(file: UploadFile = File(...)):
             matrix = _embedding_matrix
         
         if matrix is None:
-            _rebuild_cache()
+            await _rebuild_cache()
             with _cache_lock:
                 names = _embedding_names
                 matrix = _embedding_matrix
@@ -1191,6 +1196,7 @@ async def enroll(user_id: str = Form(...), files: list[UploadFile] = File(...), 
         tmp_save = str(SPEAKERS_DIR / f".tmp-{uuid.uuid4()}")
         final_path = str(SPEAKERS_DIR / f"{user_id}.npy")
         await run_in_threadpool(_save_embedding_and_rebuild, tmp_save, avg_embeddings.numpy(), final_path)
+        await _rebuild_cache()
 
         logger.info(f"Voice enrolled: {user_id} ({len(files)} samples)")
         return EnrollResponse(status="success", user_id=user_id)

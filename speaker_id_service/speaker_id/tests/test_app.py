@@ -243,22 +243,24 @@ def test_enroll_empty_signal(mock_remove, mock_load, mock_convert, mock_open):
     assert response.status_code == 400
     assert response.json()["detail"] == "Audio too short or empty"
 
+@pytest.mark.asyncio
 @patch("app.Path.glob")
-def test_rebuild_cache_empty(mock_glob):
+async def test_rebuild_cache_empty(mock_glob):
     """Test _rebuild_cache when no speaker files are present"""
     mock_glob.return_value = []
 
-    app._rebuild_cache()
+    await app._rebuild_cache()
 
     assert app._embedding_names == []
     assert app._embedding_matrix is None
 
+@pytest.mark.asyncio
 @patch("app.Path.glob")
 @patch("app.np.load")
 @patch("app.torch.tensor")
 @patch("app.F.normalize")
 @patch("app.torch.stack")
-def test_rebuild_cache_success(mock_stack, mock_normalize, mock_tensor, mock_load, mock_glob):
+async def test_rebuild_cache_success(mock_stack, mock_normalize, mock_tensor, mock_load, mock_glob):
     """Test _rebuild_cache successfully loading valid speaker files"""
     class MockPath:
         def __init__(self, name):
@@ -284,7 +286,7 @@ def test_rebuild_cache_success(mock_stack, mock_normalize, mock_tensor, mock_loa
     mock_stacked = MagicMock()
     mock_stack.return_value = mock_stacked
 
-    app._rebuild_cache()
+    await app._rebuild_cache()
 
     assert app._embedding_names == ["user1", "user2"]
     assert app._embedding_matrix is mock_stacked
@@ -294,12 +296,13 @@ def test_rebuild_cache_success(mock_stack, mock_normalize, mock_tensor, mock_loa
     assert mock_normalize.call_count == 2
     mock_stack.assert_called_once_with([mock_norm_obj1, mock_norm_obj2])
 
+@pytest.mark.asyncio
 @patch("app.Path.glob")
 @patch("app.np.load")
 @patch("app.torch.tensor")
 @patch("app.F.normalize")
 @patch("app.torch.stack")
-def test_rebuild_cache_partial_failure(mock_stack, mock_normalize, mock_tensor, mock_load, mock_glob):
+async def test_rebuild_cache_partial_failure(mock_stack, mock_normalize, mock_tensor, mock_load, mock_glob):
     """Test _rebuild_cache skipping corrupted files and loading valid ones"""
     class MockPath:
         def __init__(self, name):
@@ -325,7 +328,7 @@ def test_rebuild_cache_partial_failure(mock_stack, mock_normalize, mock_tensor, 
     mock_stacked = MagicMock()
     mock_stack.return_value = mock_stacked
 
-    app._rebuild_cache()
+    await app._rebuild_cache()
 
     assert app._embedding_names == ["valid_user"]
     assert app._embedding_matrix is mock_stacked
@@ -379,7 +382,7 @@ def test_identify_gpu_fallback(mock_logger, mock_normalize, mock_fbank, mock_rem
 
     with patch("app.model") as mock_model, \
          patch("app._embedding_matrix", None), \
-         patch("app._rebuild_cache"):
+         patch("app._rebuild_cache", new_callable=AsyncMock):
 
         mock_model.side_effect = RuntimeError("OOM")
         mock_model.cpu.return_value = mock_cpu_model
