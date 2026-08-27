@@ -148,6 +148,7 @@ MAX_FILES = 50                    # max audio samples accepted per enrollment
 _embedding_names: list[str] = []                 # index i  <-> speaker name
 _embedding_matrix: torch.Tensor | None = None    # (num_speakers, 512), L2-norm rows
 _cache_lock = threading.Lock()
+_async_cache_lock = asyncio.Lock()
 # Pre-created no-op resampler (16k->16k); compute_fbank swaps it lazily only
 # when a non-16kHz signal shows up, avoiding per-request transform init.
 _resampler_16k = torchaudio.transforms.Resample(orig_freq=16000, new_freq=16000).to(device)
@@ -339,10 +340,18 @@ async def identify(file: UploadFile = File(...)):
             matrix = _embedding_matrix
         
         if matrix is None:
-            _rebuild_cache()
-            with _cache_lock:
-                names = _embedding_names
-                matrix = _embedding_matrix
+            async with _async_cache_lock:
+                # Double-check inside lock in case another request already rebuilt it
+                with _cache_lock:
+                    if _embedding_matrix is not None:
+                        matrix = _embedding_matrix
+                        names = _embedding_names
+
+                if matrix is None:
+                    await run_in_threadpool(_rebuild_cache)
+                    with _cache_lock:
+                        names = _embedding_names
+                        matrix = _embedding_matrix
         
         if matrix is not None:
             scores = (embedding.squeeze(0) @ matrix.T).cpu().numpy()
