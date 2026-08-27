@@ -148,6 +148,7 @@ MAX_FILES = 50                    # max audio samples accepted per enrollment
 _embedding_names: list[str] = []                 # index i  <-> speaker name
 _embedding_matrix: torch.Tensor | None = None    # (num_speakers, 512), L2-norm rows
 _cache_lock = threading.Lock()
+_inference_lock = threading.Lock()
 # Pre-created no-op resampler (16k->16k); compute_fbank swaps it lazily only
 # when a non-16kHz signal shows up, avoiding per-request transform init.
 _resampler_16k = torchaudio.transforms.Resample(orig_freq=16000, new_freq=16000).to(device)
@@ -269,6 +270,28 @@ def _rebuild_cache():
         _embedding_names = names
         _embedding_matrix = torch.stack(tensors) if tensors else None
 
+def _run_inference(fbank: torch.Tensor) -> torch.Tensor:
+    """Run model inference synchronously."""
+    with torch.no_grad():
+        try:
+            # We must lock the entire forward pass if we want to ensure
+            # thread safety during a fallback, because another thread might
+            # be mid-fallback (model on CPU) while we try to infer on GPU.
+            with _inference_lock:
+                embedding = model(fbank)
+        except RuntimeError as e:
+            # GPU hiccup (OOM, driver reset): retry once on CPU, then put
+            # the model back so subsequent requests use the GPU again.
+            logger.warning(f"GPU inference failed, falling back to CPU: {e}")
+            with _inference_lock:
+                fbank_cpu = fbank.cpu()
+                model_cpu = model.cpu()
+                with torch.no_grad():
+                    embedding = model_cpu(fbank_cpu)
+                model.to(device)
+                embedding = embedding.to(device)
+        return embedding
+
 @app.post("/identify", response_model=IdentifyResponse)
 async def identify(file: UploadFile = File(...)):
     """Identify a speaker from a single uploaded audio file (no auth).
@@ -317,19 +340,7 @@ async def identify(file: UploadFile = File(...)):
         if peak > 0:
             signal = signal / peak * 0.9
         fbank = compute_fbank(signal.to(device), fs)
-        with torch.no_grad():
-            try:
-                embedding = model(fbank)
-            except RuntimeError as e:
-                # GPU hiccup (OOM, driver reset): retry once on CPU, then put
-                # the model back so subsequent requests use the GPU again.
-                logger.warning(f"GPU inference failed, falling back to CPU: {e}")
-                fbank_cpu = fbank.cpu()
-                model_cpu = model.cpu()
-                with torch.no_grad():
-                    embedding = model_cpu(fbank_cpu)
-                model.to(device)
-                embedding = embedding.to(device)
+        embedding = await run_in_threadpool(_run_inference, fbank)
         embedding = F.normalize(embedding, p=2, dim=-1)  # cosine == dot product now
 
         # Snapshot the gallery under the lock (matrix swap is atomic), then do
