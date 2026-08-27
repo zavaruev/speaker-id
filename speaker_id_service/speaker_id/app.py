@@ -305,7 +305,7 @@ async def identify(file: UploadFile = File(...)):
                 await buffer.write(chunk)
 
         if not await convert_to_wav(temp_input, temp_wav):
-            raise HTTPException(status_code=500, detail="Failed to process audio format")
+            raise HTTPException(status_code=500, detail="Audio conversion failed")
 
         signal, fs = await run_in_threadpool(torchaudio.load, temp_wav)
         # ~0.25 s minimum: shorter clips produce unstable embeddings.
@@ -1153,7 +1153,7 @@ async def enroll(user_id: str = Form(...), files: list[UploadFile] = File(...), 
                     await buffer.write(chunk)
 
             if not await convert_to_wav(temp_input, temp_wav):
-                raise HTTPException(status_code=500, detail="Failed to process audio format")
+                raise HTTPException(status_code=500, detail="Audio conversion failed")
 
             signal, fs = await run_in_threadpool(torchaudio.load, temp_wav)
             if signal.numel() == 0 or signal.shape[-1] < 4000:

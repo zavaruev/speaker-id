@@ -1,0 +1,23 @@
+--- speaker_id_service/speaker_id/tests/test_app.py
++++ speaker_id_service/speaker_id/tests/test_app.py
+@@ -171,6 +171,20 @@
+     assert response.json() == {"detail": "Audio too short or empty"}
+
+
++@patch("builtins.open", new_callable=MagicMock)
++@patch("app.convert_to_wav", new_callable=AsyncMock, return_value=False)
++@patch("os.path.getsize", return_value=1024)
++@patch("os.remove", return_value=None)
++def test_identify_convert_to_wav_failure(mock_remove, mock_getsize, mock_convert, mock_open):
++    """Test identify endpoint handles audio conversion failure"""
++    response = client.post(
++        "/identify",
++        files={"file": ("test.wav", b"dummy content", "audio/wav")}
++    )
++
++    assert response.status_code == 500
++    assert response.json() == {"detail": "Audio conversion failed"}
++
+ def test_enroll_form_success():
+     """Test that the /enroll HTML form returns correctly."""
+     response = client.get("/enroll")
