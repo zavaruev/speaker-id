@@ -33,6 +33,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import pooling_layers
+from pooling_layers import MHASTPConfig, MQMHASTPConfig
 
 
 def get_nonlinear(config_str, channels):
@@ -439,7 +440,12 @@ class CAMPPlus(nn.Module):
 
         # Pooling resolves by name from pooling_layers (e.g. 'TSTP', 'ASTP');
         # doubling by stats means the dense layer sees 2*channels inputs.
-        self.pool = getattr(pooling_layers, pooling_func)(in_dim=channels)
+        if pooling_func == 'MHASTP':
+            self.pool = pooling_layers.MHASTP(MHASTPConfig(in_dim=channels))
+        elif pooling_func == 'MQMHASTP':
+            self.pool = pooling_layers.MQMHASTP(MQMHASTPConfig(in_dim=channels))
+        else:
+            self.pool = getattr(pooling_layers, pooling_func)(in_dim=channels)
         self.pool_out_dim = self.pool.get_out_dim()
         self.xvector.add_module('stats', self.pool)
         self.xvector.add_module(
