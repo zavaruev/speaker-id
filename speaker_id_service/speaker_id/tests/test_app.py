@@ -122,6 +122,15 @@ async def test_convert_to_wav_shell_injection(mock_create_subprocess_exec):
         stderr=app.asyncio.subprocess.DEVNULL
     )
 
+@pytest.mark.asyncio
+@patch("app.asyncio.create_subprocess_exec")
+async def test_convert_to_wav_file_not_found(mock_create_subprocess_exec):
+    """Test that missing ffmpeg binary returns False"""
+    mock_create_subprocess_exec.side_effect = FileNotFoundError()
+
+    result = await app.convert_to_wav("input.wav", "output.wav")
+    assert result is False
+
 def test_health_ready():
     """Test health endpoint when model is ready"""
     # By default in the mock setup, app._model_ready is True or we can explicitly set it
