@@ -4,3 +4,5 @@ __pycache__/
 speaker_id_service/models/
 speaker_id_service/speakers/
 venv/
+speakers/
+models/
