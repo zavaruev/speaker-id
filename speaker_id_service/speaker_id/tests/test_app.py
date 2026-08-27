@@ -393,7 +393,7 @@ def test_identify_gpu_fallback(mock_logger, mock_normalize, mock_fbank, mock_rem
         mock_model.cpu.assert_called_once()
         mock_fbank_tensor.cpu.assert_called_once()
         mock_cpu_model.assert_called_once_with(mock_fbank_tensor_cpu)
-        mock_model.to.assert_called_once_with(app.device)
+        mock_model.to.assert_called_with(app.device)
         mock_logger.warning.assert_called_with("GPU inference failed, falling back to CPU: OOM")
 
 

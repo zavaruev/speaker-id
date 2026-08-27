@@ -121,7 +121,7 @@ async def identify(file: UploadFile = File(...)):
                 await buffer.write(chunk)
 
         signal, fs = await run_in_threadpool(torchaudio.load, temp_path)
-        embeddings = classifier.encode_batch(signal)
+        embeddings = await run_in_threadpool(classifier.encode_batch, signal)
         
         max_score = 0.0
         best_user = "unknown"
@@ -173,7 +173,7 @@ async def enroll(user_id: str = Form(...), file: UploadFile = File(...), api_key
                 await buffer.write(chunk)
 
         signal, fs = await run_in_threadpool(torchaudio.load, temp_path)
-        embeddings = classifier.encode_batch(signal)
+        embeddings = await run_in_threadpool(classifier.encode_batch, signal)
         
         await run_in_threadpool(_save_embedding_setup, SPEAKERS_DIR / f"{safe_user_id}.npy", embeddings.squeeze().cpu().numpy())
         return EnrollResponse(status="success", user_id=safe_user_id)

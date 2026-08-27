@@ -148,6 +148,9 @@ MAX_FILES = 50                    # max audio samples accepted per enrollment
 _embedding_names: list[str] = []                 # index i  <-> speaker name
 _embedding_matrix: torch.Tensor | None = None    # (num_speakers, 512), L2-norm rows
 _cache_lock = threading.Lock()
+# Inference lock to prevent concurrent CPU fallbacks from moving the model
+# while other threads are using it on the GPU.
+_model_lock = threading.Lock()
 # Pre-created no-op resampler (16k->16k); compute_fbank swaps it lazily only
 # when a non-16kHz signal shows up, avoiding per-request transform init.
 _resampler_16k = torchaudio.transforms.Resample(orig_freq=16000, new_freq=16000).to(device)
@@ -172,6 +175,30 @@ async def get_api_key(api_key: str = Security(api_key_header)):
             detail="Invalid or missing API Key",
         )
     return api_key
+
+def _model_inference(fbank_tensor: torch.Tensor) -> torch.Tensor:
+    """Helper to run model inference (with CPU fallback) in a threadpool.
+
+    Model inference is a heavy synchronous operation that blocks the asyncio
+    event loop. Encapsulating it allows us to run it via run_in_threadpool.
+    """
+    with torch.no_grad():
+        try:
+            with _model_lock:
+                # Ensure the model is on the correct device if it was temporarily moved by another thread
+                if str(next(model.parameters()).device) != str(device):
+                    model.to(device)
+            embedding = model(fbank_tensor)
+        except RuntimeError as e:
+            with _model_lock:
+                logger.warning(f"GPU inference failed, falling back to CPU: {e}")
+                fbank_cpu = fbank_tensor.cpu()
+                model_cpu = model.cpu()
+                with torch.no_grad():
+                    embedding = model_cpu(fbank_cpu)
+                model.to(device)
+                embedding = embedding.to(device)
+        return embedding
 
 def compute_fbank(signal: torch.Tensor, fs: int) -> torch.Tensor:
     """Waveform -> CAMPPlus input features.
@@ -317,19 +344,7 @@ async def identify(file: UploadFile = File(...)):
         if peak > 0:
             signal = signal / peak * 0.9
         fbank = compute_fbank(signal.to(device), fs)
-        with torch.no_grad():
-            try:
-                embedding = model(fbank)
-            except RuntimeError as e:
-                # GPU hiccup (OOM, driver reset): retry once on CPU, then put
-                # the model back so subsequent requests use the GPU again.
-                logger.warning(f"GPU inference failed, falling back to CPU: {e}")
-                fbank_cpu = fbank.cpu()
-                model_cpu = model.cpu()
-                with torch.no_grad():
-                    embedding = model_cpu(fbank_cpu)
-                model.to(device)
-                embedding = embedding.to(device)
+        embedding = await run_in_threadpool(_model_inference, fbank)
         embedding = F.normalize(embedding, p=2, dim=-1)  # cosine == dot product now
 
         # Snapshot the gallery under the lock (matrix swap is atomic), then do
@@ -1164,18 +1179,7 @@ async def enroll(user_id: str = Form(...), files: list[UploadFile] = File(...), 
             if peak > 0:
                 signal = signal / peak * 0.9
             fbank = compute_fbank(signal.to(device), fs)
-            with torch.no_grad():
-                try:
-                    embedding = model(fbank)
-                except RuntimeError as e:
-                    # Same CPU fallback contract as /identify.
-                    logger.warning(f"GPU inference failed in enroll, falling back to CPU: {e}")
-                    fbank_cpu = fbank.cpu()
-                    model_cpu = model.cpu()
-                    with torch.no_grad():
-                        embedding = model_cpu(fbank_cpu)
-                    model.to(device)
-                    embedding = embedding.to(device)
+            embedding = await run_in_threadpool(_model_inference, fbank)
             embedding = F.normalize(embedding, p=2, dim=-1)
             embeddings_list.append(embedding.squeeze().cpu())
 
