@@ -13,8 +13,6 @@ import time
 import numpy as np
 import shutil
 import uuid
-import tempfile
-import os
 from pathlib import Path
 from fastapi.concurrency import run_in_threadpool
 
