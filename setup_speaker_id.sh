@@ -24,6 +24,7 @@ EOF
 echo "🐍 Создаем app.py..."
 cat << 'EOF' > speaker_id/app.py
 import os
+import secrets
 import tempfile
 import anyio
 import torch
@@ -74,7 +75,7 @@ api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
 
 async def get_api_key(api_key: str = Security(api_key_header)):
     expected_api_key = os.environ.get("API_KEY")
-    if not expected_api_key or api_key != expected_api_key:
+    if not expected_api_key or not api_key or not secrets.compare_digest(api_key, expected_api_key):
         raise HTTPException(
             status_code=401,
             detail="Invalid or missing API Key",

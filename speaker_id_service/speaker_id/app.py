@@ -28,6 +28,7 @@ os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
 import uuid
 import sys
 import asyncio
+import secrets
 import tempfile
 import anyio
 import hashlib
@@ -166,7 +167,7 @@ async def get_api_key(api_key: str = Security(api_key_header)):
     to an open door.
     """
     expected_api_key = os.environ.get("API_KEY")
-    if not expected_api_key or api_key != expected_api_key:
+    if not expected_api_key or not api_key or not secrets.compare_digest(api_key, expected_api_key):
         raise HTTPException(
             status_code=401,
             detail="Invalid or missing API Key",
