@@ -92,9 +92,14 @@ fi
 
 echo "Sending $SAMPLES samples for user '$USER_NAME' to server..."
 
+# Use a temporary config file for curl to avoid leaking the API key in the process list
+CURL_CONFIG=$(mktemp)
+chmod 600 "$CURL_CONFIG"
+echo "header = \"X-API-Key: ${API_KEY}\"" > "$CURL_CONFIG"
+
 CURL_ARGS=("-s" "-w" "\nHTTP_STATUS:%{http_code}" "-X" POST "$SERVER_URL" \
     "-H" "accept: application/json" \
-    "-H" "X-API-Key: ${API_KEY}" \
+    "-K" "$CURL_CONFIG" \
     "-F" "user_id=${USER_NAME}")
 
 for f in "${FILES[@]}"; do
@@ -121,3 +126,4 @@ fi
 for f in "${FILES[@]}"; do
     rm -f "$f"
 done
+rm -f "$CURL_CONFIG"
