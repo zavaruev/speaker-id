@@ -379,7 +379,17 @@ def test_identify_gpu_fallback(mock_logger, mock_normalize, mock_fbank, mock_rem
 
     with patch("app.model") as mock_model, \
          patch("app._embedding_matrix", None), \
-         patch("app._rebuild_cache"):
+         patch("app._rebuild_cache"), \
+         patch("app.run_in_threadpool", new_callable=AsyncMock) as mock_threadpool:
+
+        # mock_threadpool must return the awaited mock_load for torchaudio.load,
+        # and do nothing for _save_embedding_and_rebuild
+        async def mock_run_in_threadpool(func, *args, **kwargs):
+            if func == app.torchaudio.load:
+                return mock_load.return_value
+            return None
+
+        mock_threadpool.side_effect = mock_run_in_threadpool
 
         mock_model.side_effect = RuntimeError("OOM")
         mock_model.cpu.return_value = mock_cpu_model
@@ -395,6 +405,57 @@ def test_identify_gpu_fallback(mock_logger, mock_normalize, mock_fbank, mock_rem
         mock_cpu_model.assert_called_once_with(mock_fbank_tensor_cpu)
         mock_model.to.assert_called_once_with(app.device)
         mock_logger.warning.assert_called_with("GPU inference failed, falling back to CPU: OOM")
+
+
+@patch("builtins.open", new_callable=MagicMock)
+@patch("app.convert_to_wav", new_callable=AsyncMock)
+@patch("app.torchaudio.load")
+@patch("os.remove", return_value=None)
+@patch("app.compute_fbank")
+@patch("app.F.normalize")
+@patch("app.logger")
+@patch("app._save_embedding_and_rebuild")
+def test_enroll_gpu_fallback(mock_save_embedding, mock_logger, mock_normalize, mock_fbank, mock_remove, mock_load, mock_convert, mock_open):
+    """Test that GPU fallback executes when model(fbank) raises RuntimeError in enroll."""
+    mock_convert.return_value = True
+
+    mock_signal = MagicMock()
+    mock_signal.numel.return_value = 8000
+    mock_signal.shape = [1, 8000]
+    mock_signal.abs().max.return_value = 1.0
+    mock_signal.to.return_value = mock_signal
+    mock_load.return_value = (mock_signal, 16000)
+
+    mock_fbank_tensor = MagicMock()
+    mock_fbank_tensor_cpu = MagicMock()
+    mock_fbank_tensor.cpu.return_value = mock_fbank_tensor_cpu
+    mock_fbank.return_value = mock_fbank_tensor
+
+    mock_cpu_model = MagicMock()
+    mock_cpu_model_embedding = MagicMock()
+    mock_cpu_model_embedding.to.return_value = MagicMock()
+    mock_cpu_model.return_value = mock_cpu_model_embedding
+
+    with patch("app.model") as mock_model, \
+         patch("app._embedding_matrix", None), \
+         patch("app._rebuild_cache"):
+
+        mock_model.side_effect = RuntimeError("OOM")
+        mock_model.cpu.return_value = mock_cpu_model
+
+        response = client.post(
+            "/enroll",
+            data={"user_id": "test_user"},
+            files=[("files", ("test.wav", b"dummy content", "audio/wav"))],
+            headers={"X-API-KEY": "default_secret_key"}
+        )
+
+        assert response.status_code == 200
+        mock_model.cpu.assert_called_once()
+        mock_fbank_tensor.cpu.assert_called_once()
+        mock_cpu_model.assert_called_once_with(mock_fbank_tensor_cpu)
+        mock_model.to.assert_called_with(app.device)
+        mock_logger.warning.assert_called_with("GPU inference failed in enroll, falling back to CPU: OOM")
 
 
 @patch("app.kaldi.fbank")
