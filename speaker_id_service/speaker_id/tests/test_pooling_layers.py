@@ -1,7 +1,7 @@
 import torch
 import pytest
 
-from pooling_layers import TSTP, MHASTP, MQMHASTP, ASP, XI, TAP, TSDP, ASTP
+from pooling_layers import TSTP, MHASTP, MQMHASTP, ASP, XI, TAP, TSDP, ASTP, MHASTPConfig, MQMHASTPConfig
 
 def test_asp_init_w2v():
     """Test ASP initialization with W2V-style arguments."""
@@ -198,7 +198,7 @@ def test_mhastp_forward_shape_3d():
     """Test that the MHASTP pooling layer outputs the correct shape for 3D input."""
     in_dim = 80
     head_num = 4
-    model = MHASTP(in_dim=in_dim, head_num=head_num)
+    model = MHASTP(MHASTPConfig(in_dim=in_dim, head_num=head_num))
 
     # Input tensor shape: (batch_size, feature_dim, time_steps)
     batch_size = 4
@@ -218,7 +218,7 @@ def test_mhastp_forward_shape_4d():
     features = 10
     in_dim = channels * features
     head_num = 4
-    model = MHASTP(in_dim=in_dim, head_num=head_num)
+    model = MHASTP(MHASTPConfig(in_dim=in_dim, head_num=head_num))
 
     # Input tensor shape: (batch_size, channels, features, time_steps)
     batch_size = 4
@@ -236,14 +236,14 @@ def test_mhastp_invalid_head_num():
     head_num = 3 # 80 is not divisible by 3
 
     with pytest.raises(AssertionError):
-        MHASTP(in_dim=in_dim, head_num=head_num)
+        MHASTP(MHASTPConfig(in_dim=in_dim, head_num=head_num))
 
 def test_mqmhastp_forward_shape():
     """Test that the MQMHASTP pooling layer outputs the correct shape for 3D input."""
     in_dim = 80
     query_num = 2
     head_num = 8
-    model = MQMHASTP(in_dim=in_dim, query_num=query_num, head_num=head_num)
+    model = MQMHASTP(MQMHASTPConfig(in_dim=in_dim, query_num=query_num, head_num=head_num))
 
     # Input tensor shape: (batch_size, feature_dim, time_steps)
     batch_size = 4
@@ -262,7 +262,7 @@ def test_mqmhastp_forward_shape_4d():
     features = 20 # channels * features = in_dim = 80
     query_num = 2
     head_num = 8
-    model = MQMHASTP(in_dim=in_dim, query_num=query_num, head_num=head_num)
+    model = MQMHASTP(MQMHASTPConfig(in_dim=in_dim, query_num=query_num, head_num=head_num))
 
     batch_size = 4
     time_steps = 100

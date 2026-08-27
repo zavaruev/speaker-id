@@ -22,6 +22,7 @@ even though we remove the mean statistic, on Voxceleb.
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from dataclasses import dataclass
 
 
 class TAP(nn.Module):
@@ -220,6 +221,25 @@ class ASP(nn.Module):
         return torch.cat([mu, sg], dim=1)
 
 
+@dataclass
+class MHASTPConfig:
+    in_dim: int
+    layer_num: int = 2
+    head_num: int = 2
+    d_s: int = 1
+    bottleneck_dim: int = 64
+
+
+@dataclass
+class MQMHASTPConfig:
+    in_dim: int
+    layer_num: int = 2
+    query_num: int = 2
+    head_num: int = 8
+    d_s: int = 2
+    bottleneck_dim: int = 64
+
+
 class MHASTP(torch.nn.Module):
     """ Multi head attentive statistics pooling
     Reference:
@@ -227,14 +247,14 @@ class MHASTP(torch.nn.Module):
         https://arxiv.org/pdf/1906.09890.pdf
     """
 
-    def __init__(self,
-                 in_dim,
-                 layer_num=2,
-                 head_num=2,
-                 d_s=1,
-                 bottleneck_dim=64,
-                 **kwargs):
+    def __init__(self, config: MHASTPConfig, **kwargs):
         super(MHASTP, self).__init__()
+        in_dim = config.in_dim
+        layer_num = config.layer_num
+        head_num = config.head_num
+        d_s = config.d_s
+        bottleneck_dim = config.bottleneck_dim
+
         assert (in_dim % head_num
                 ) == 0  # make sure that head num can be divided by input_dim
         self.in_dim = in_dim
@@ -318,21 +338,24 @@ class MQMHASTP(torch.nn.Module):
         http://www.interspeech2020.org/uploadfile/pdf/Mon-2-10-5.pdf
     """
 
-    def __init__(self,
-                 in_dim,
-                 layer_num=2,
-                 query_num=2,
-                 head_num=8,
-                 d_s=2,
-                 bottleneck_dim=64,
-                 **kwargs):
+    def __init__(self, config: MQMHASTPConfig, **kwargs):
         super(MQMHASTP, self).__init__()
+        in_dim = config.in_dim
+        layer_num = config.layer_num
+        query_num = config.query_num
+        head_num = config.head_num
+        d_s = config.d_s
+        bottleneck_dim = config.bottleneck_dim
+
+        mhastp_config = MHASTPConfig(
+            in_dim=in_dim,
+            layer_num=layer_num,
+            head_num=head_num,
+            d_s=d_s,
+            bottleneck_dim=bottleneck_dim
+        )
         self.n_query = nn.ModuleList([
-            MHASTP(in_dim,
-                   layer_num=layer_num,
-                   head_num=head_num,
-                   d_s=d_s,
-                   bottleneck_dim=bottleneck_dim) for i in range(query_num)
+            MHASTP(mhastp_config) for i in range(query_num)
         ])
         self.query_num = query_num
         self.in_dim = in_dim
@@ -433,9 +456,9 @@ class XI(torch.nn.Module):
 if __name__ == '__main__':
     data = torch.randn(16, 512, 10, 35)
     # model = StatisticsPooling()
-    model = MQMHASTP(512 * 10)
-    model = MHASTP(512 * 10)
-    model = MQMHASTP(512 * 10, context=False)
+    model = MQMHASTP(MQMHASTPConfig(in_dim=512 * 10))
+    model = MHASTP(MHASTPConfig(in_dim=512 * 10))
+    model = MQMHASTP(MQMHASTPConfig(in_dim=512 * 10), context=False)
     print(model)
 
     out = model(data)
