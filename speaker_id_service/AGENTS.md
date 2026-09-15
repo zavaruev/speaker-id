@@ -48,4 +48,3 @@ GPU: NVIDIA with CUDA 11.8 (Pascal+). Container runs `nvidia` device driver rese
 - `docker-compose.yaml`: `HF_TOKEN=0`, `HF_HUB_VERBOSITY=error` — suppress HuggingFace noise
 - Set in `app.py` via `os.environ`: `HF_HUB_DISABLE_SYMLINKS_WARNING=1`, `HF_HUB_DISABLE_PROGRESS_BARS=1`
 - Minimum audio: 4000 samples (~0.25s at 16kHz)
-- Known quirk: `compute_fbank` uses `dither=1.0` (Kaldi's int16-scale convention) while inputs are peak-normalized floats — torchaudio adds N(0,1)-scale noise, making embeddings slightly non-deterministic (~0.05 cosine jitter on identical input measured). Candidate fix: `dither=0.0`; needs owner sign-off because accuracy figures were tuned against current behavior.

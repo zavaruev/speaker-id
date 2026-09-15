@@ -181,12 +181,11 @@ def compute_fbank(signal: torch.Tensor, fs: int) -> torch.Tensor:
     the exact frame geometry CAMPPlus was trained with (25 ms window /
     10 ms shift), then mean-normalizes over time.
 
-    Note on dither=1.0: this follows the classic Kaldi convention where
-    waveforms are int16-scaled (dither noise ~ -90 dBFS). Our waveform is a
-    peak-normalized float in [-1, 1], so torchaudio adds Gaussian noise of
-    std ~1.0 directly onto it. Embeddings stay usable (speaker structure
-    survives) but become slightly non-deterministic run-to-run (~0.05 cosine
-    jitter measured on identical input).
+    Note on dither=0.0: historically dither=1.0 was used following the classic
+    Kaldi convention where waveforms are int16-scaled. Our waveform is a
+    peak-normalized float in [-1, 1], so torchaudio's default added Gaussian
+    noise of std ~1.0 directly onto it, causing slightly non-deterministic
+    embeddings. Setting dither=0.0 fixes this for float inputs.
     """
     if fs != 16000:
         global _resampler_16k
@@ -194,7 +193,7 @@ def compute_fbank(signal: torch.Tensor, fs: int) -> torch.Tensor:
             _resampler_16k = torchaudio.transforms.Resample(fs, 16000).to(signal.device)
         signal = _resampler_16k(signal)
         fs = 16000
-    fbank = kaldi.fbank(signal, num_mel_bins=80, frame_length=25, frame_shift=10, dither=1.0, sample_frequency=fs)
+    fbank = kaldi.fbank(signal, num_mel_bins=80, frame_length=25, frame_shift=10, dither=0.0, sample_frequency=fs)
     fbank = fbank - fbank.mean(dim=0, keepdim=True)
     return fbank.unsqueeze(0)  # (1, num_frames, feat_dim)
 
