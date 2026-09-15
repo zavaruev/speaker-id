@@ -50,7 +50,7 @@ def _safe_remove(path: str):
         os.remove(path)
     except FileNotFoundError:
         pass
-    except Exception as e:
+    except OSError as e:
         logger.warning(f"Failed to remove {path}: {e}")
 
 app = FastAPI()

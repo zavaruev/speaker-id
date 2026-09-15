@@ -66,7 +66,7 @@ def _safe_remove(path: str):
         os.remove(path)
     except FileNotFoundError:
         pass
-    except Exception as e:
+    except OSError as e:
         logger.warning(f"Failed to remove {path}: {e}")
 
 for _logger in ["httpx", "urllib3", "filelock"]:
@@ -263,7 +263,7 @@ def _rebuild_cache():
             t = F.normalize(t, p=2, dim=-1)
             names.append(speaker_file.stem)
             tensors.append(t)
-        except Exception as e:
+        except (OSError, ValueError, RuntimeError) as e:
             logger.warning(f"Skipping corrupted {speaker_file.name}: {e}")
     with _cache_lock:
         _embedding_names = names
