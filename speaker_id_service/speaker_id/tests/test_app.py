@@ -107,6 +107,19 @@ async def test_convert_to_wav_called_process_error(mock_create_subprocess_exec):
 
 @pytest.mark.asyncio
 @patch("app.asyncio.create_subprocess_exec")
+async def test_convert_to_wav_short_audio_edge_case(mock_create_subprocess_exec):
+    """Test that short or invalid audio simulating ffmpeg failure returns False"""
+    mock_process = AsyncMock()
+    mock_process.communicate = AsyncMock()
+    # FFmpeg typically returns a non-zero exit code (e.g., 1 or 69) for invalid/short inputs.
+    mock_process.returncode = 1
+    mock_create_subprocess_exec.return_value = mock_process
+
+    result = await app.convert_to_wav("input.wav", "output.wav")
+    assert result is False
+
+@pytest.mark.asyncio
+@patch("app.asyncio.create_subprocess_exec")
 async def test_convert_to_wav_shell_injection(mock_create_subprocess_exec):
     """Test that command injection is prevented by string casting and passing args directly to exec"""
     mock_process = AsyncMock()
