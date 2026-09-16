@@ -2,11 +2,31 @@ import io
 from fastapi.testclient import TestClient
 from unittest.mock import patch, MagicMock
 
+import sys
+class MockTorch(MagicMock):
+    pass
+
+sys.modules['torch'] = MockTorch()
+sys.modules['torch.nn'] = MagicMock()
+sys.modules['torch.nn.functional'] = MagicMock()
+sys.modules['torchaudio'] = MagicMock()
+sys.modules['torchaudio.compliance'] = MagicMock()
+sys.modules['torchaudio.compliance.kaldi'] = MagicMock()
+
+import torch
+torch.load = MagicMock(return_value={})
+torch.cuda = MagicMock()
+torch.cuda.is_available.return_value = False
+
+
 # Mock the urllib and torch.load dependencies to prevent downloading the heavy model and loading it
 # These must be mocked BEFORE importing app
 with patch("urllib.request.urlretrieve", MagicMock()), \
      patch("torch.load", MagicMock(return_value={})), \
-     patch("campplus_model.CAMPPlus", MagicMock(return_value=MagicMock())):
+     patch("campplus_model.CAMPPlus", MagicMock(return_value=MagicMock())), \
+     patch("builtins.open", MagicMock(return_value=MagicMock(__enter__=MagicMock(return_value=MagicMock(read=MagicMock(side_effect=[b"", b""])))))), \
+     patch("hashlib.sha256", MagicMock(return_value=MagicMock(hexdigest=MagicMock(return_value="07abeeb5150441995b51ea65c9ccc8feed78b33040012f1d2fad29a0e4f5b8d7")))):
+
 
     from app import app, SPEAKERS_DIR
 

@@ -27,6 +27,8 @@ os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
 os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
 import uuid
 import sys
+import time
+import collections
 import asyncio
 import tempfile
 import anyio
@@ -37,7 +39,7 @@ import torchaudio
 import torchaudio.compliance.kaldi as kaldi
 import numpy as np
 import torch.nn.functional as F
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Security
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Security, Request, Depends
 from fastapi.responses import HTMLResponse
 from fastapi.concurrency import run_in_threadpool
 from fastapi.security import APIKeyHeader
@@ -269,7 +271,37 @@ def _rebuild_cache():
         _embedding_names = names
         _embedding_matrix = torch.stack(tensors) if tensors else None
 
-@app.post("/identify", response_model=IdentifyResponse)
+
+# ---------------------------------------------------------------------------
+# Rate Limiting
+# Simple in-memory rate limiting per IP address.
+RATE_LIMIT_WINDOW = 60  # seconds
+RATE_LIMIT_MAX_REQUESTS = 10
+_rate_limits = collections.defaultdict(list)
+_rate_limit_lock = threading.Lock()
+
+async def check_rate_limit(request: Request):
+    # Support reverse proxies
+    forwarded = request.headers.get("X-Forwarded-For")
+    if forwarded:
+        client_ip = forwarded.split(",")[0].strip()
+    else:
+        client_ip = request.headers.get("X-Real-IP") or (request.client.host if request.client else "unknown")
+
+    now = time.time()
+    with _rate_limit_lock:
+        # Clean up old entries and remove empty IPs to prevent memory leak
+        for ip in list(_rate_limits.keys()):
+            _rate_limits[ip] = [ts for ts in _rate_limits[ip] if now - ts < RATE_LIMIT_WINDOW]
+            if not _rate_limits[ip]:
+                del _rate_limits[ip]
+
+        if len(_rate_limits[client_ip]) >= RATE_LIMIT_MAX_REQUESTS:
+            raise HTTPException(status_code=429, detail="Too Many Requests")
+
+        _rate_limits[client_ip].append(now)
+
+@app.post("/identify", response_model=IdentifyResponse, dependencies=[Depends(check_rate_limit)])
 async def identify(file: UploadFile = File(...)):
     """Identify a speaker from a single uploaded audio file (no auth).
 
@@ -1104,7 +1136,7 @@ addSample();
     return html
 
 
-@app.post("/enroll", response_model=EnrollResponse)
+@app.post("/enroll", response_model=EnrollResponse, dependencies=[Depends(check_rate_limit)])
 async def enroll(user_id: str = Form(...), files: list[UploadFile] = File(...), api_key: str = Security(get_api_key)):
     """Enroll/replace a speaker from one or more audio samples (API-key auth).
 
