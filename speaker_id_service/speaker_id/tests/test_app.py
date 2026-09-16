@@ -546,3 +546,34 @@ def test_safe_remove_exception(mock_logger_warning, mock_remove):
 
     mock_remove.assert_called_once_with("test_path.txt")
     mock_logger_warning.assert_called_once_with(f"Failed to remove test_path.txt: {error_msg}")
+
+@pytest.mark.asyncio
+async def test_cors_preflight_headers_allowed_origin():
+    from app import app
+    from httpx import AsyncClient, ASGITransport
+
+    # We patch ALLOWED_ORIGINS to something specific to avoid localhost test leaks
+    with patch.dict(os.environ, {"ALLOWED_ORIGINS": "http://example.com"}, clear=True):
+        # We need to reload the CORS middleware to apply the new env var
+        # Note: In a real app we'd recreate the app or middleware, but for testing,
+        # we can just send the request since we're using ASGITransport with the existing app
+        # Since the app was already created with the default env vars, it will have the
+        # default localhost origins. Let's just test with the default origins first.
+        pass
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client:
+        # Preflight OPTIONS request for /identify
+        headers = {
+            "Origin": "http://localhost:8001",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "X-API-Key"
+        }
+        response = await client.options("/identify", headers=headers)
+        assert response.status_code == 200
+        assert response.headers.get("access-control-allow-origin") == "http://localhost:8001"
+
+        # Test an invalid origin - it should not get the allow-origin header back
+        headers["Origin"] = "http://malicious-site.com"
+        response = await client.options("/identify", headers=headers)
+        assert response.status_code == 400 # Starlette CORS returns 400 for OPTIONS if origin is invalid
+        assert "access-control-allow-origin" not in response.headers
