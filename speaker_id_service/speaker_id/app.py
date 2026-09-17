@@ -233,8 +233,8 @@ async def convert_to_wav(input_path: str, output_path: str) -> bool:
         logger.error("FFmpeg not installed in container! Run: apt-get install ffmpeg")
         return False
 
-def _save_embedding_and_rebuild(tmp_save: str, avg_embeddings_numpy: np.ndarray, final_path: str):
-    """Persist an averaged embedding atomically, then refresh the gallery.
+def _save_embedding_and_rebuild(tmp_save: str, avg_embeddings_numpy: np.ndarray, final_path: str, user_id: str):
+    """Persist an averaged embedding atomically, then incrementally update the gallery.
 
     np.save appends '.npy' to tmp_save. The temp file must live on the same
     filesystem as final_path (the caller creates it inside SPEAKERS_DIR) so
@@ -245,7 +245,28 @@ def _save_embedding_and_rebuild(tmp_save: str, avg_embeddings_numpy: np.ndarray,
     """
     np.save(tmp_save, avg_embeddings_numpy)
     os.replace(tmp_save + ".npy", final_path)
-    _rebuild_cache()
+
+    global _embedding_names, _embedding_matrix
+
+    # Convert exactly like _rebuild_cache does
+    t = torch.tensor(avg_embeddings_numpy, device=device)
+    t = F.normalize(t, p=2, dim=-1)
+
+    with _cache_lock:
+        if user_id in _embedding_names:
+            idx = _embedding_names.index(user_id)
+            if _embedding_matrix is not None:
+                # Modifying a cloned tensor ensures readers concurrent to this block
+                # still see a consistent (old) matrix.
+                new_matrix = _embedding_matrix.clone()
+                new_matrix[idx] = t
+                _embedding_matrix = new_matrix
+        else:
+            _embedding_names = _embedding_names + [user_id]
+            if _embedding_matrix is None:
+                _embedding_matrix = t.unsqueeze(0)
+            else:
+                _embedding_matrix = torch.cat([_embedding_matrix, t.unsqueeze(0)], dim=0)
 
 def _rebuild_cache():
     """Rescan SPEAKERS_DIR and restack all embeddings into the global matrix.
@@ -1190,7 +1211,7 @@ async def enroll(user_id: str = Form(...), files: list[UploadFile] = File(...), 
         # _rebuild_cache skips unreadable leftovers with a warning.
         tmp_save = str(SPEAKERS_DIR / f".tmp-{uuid.uuid4()}")
         final_path = str(SPEAKERS_DIR / f"{user_id}.npy")
-        await run_in_threadpool(_save_embedding_and_rebuild, tmp_save, avg_embeddings.numpy(), final_path)
+        await run_in_threadpool(_save_embedding_and_rebuild, tmp_save, avg_embeddings.numpy(), final_path, user_id)
 
         logger.info(f"Voice enrolled: {user_id} ({len(files)} samples)")
         return EnrollResponse(status="success", user_id=user_id)
