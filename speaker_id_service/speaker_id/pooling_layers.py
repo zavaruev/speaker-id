@@ -239,6 +239,7 @@ class MHASTP(torch.nn.Module):
                 ) == 0  # make sure that head num can be divided by input_dim
         self.in_dim = in_dim
         self.head_num = head_num
+        self.layer_num = layer_num
         d_model = int(in_dim / head_num)
         channel_dims = [bottleneck_dim for i in range(layer_num + 1)]
         if d_s > 1:
@@ -247,20 +248,48 @@ class MHASTP(torch.nn.Module):
             d_s = 1
         self.d_s = d_s
         channel_dims[0], channel_dims[-1] = d_model, d_s
-        heads_att_trans = []
-        for i in range(self.head_num):
-            att_trans = nn.Sequential()
-            for i in range(layer_num - 1):
-                att_trans.add_module(
-                    'att_' + str(i),
-                    nn.Conv1d(channel_dims[i], channel_dims[i + 1], 1, 1))
-                att_trans.add_module('tanh' + str(i), nn.Tanh())
+
+        att_trans = nn.Sequential()
+        for i in range(layer_num - 1):
             att_trans.add_module(
-                'att_' + str(layer_num - 1),
-                nn.Conv1d(channel_dims[layer_num - 1], channel_dims[layer_num],
-                          1, 1))
-            heads_att_trans.append(att_trans)
-        self.heads_att_trans = nn.ModuleList(heads_att_trans)
+                'att_' + str(i),
+                nn.Conv1d(channel_dims[i] * head_num, channel_dims[i + 1] * head_num, 1, 1, groups=head_num))
+            att_trans.add_module('tanh' + str(i), nn.Tanh())
+        att_trans.add_module(
+            'att_' + str(layer_num - 1),
+            nn.Conv1d(channel_dims[layer_num - 1] * head_num, channel_dims[layer_num] * head_num, 1, 1, groups=head_num))
+
+        self.att_trans = att_trans
+
+    def _load_from_state_dict(self, state_dict, prefix, local_metadata, strict,
+                              missing_keys, unexpected_keys, error_msgs):
+        old_keys = [k for k in state_dict.keys() if k.startswith(prefix + 'heads_att_trans.')]
+        if old_keys:
+            for j in range(self.layer_num):
+                layer_name = f'att_{j}'
+                weight_list = []
+                bias_list = []
+
+                for h in range(self.head_num):
+                    w_key = f"{prefix}heads_att_trans.{h}.{layer_name}.weight"
+                    b_key = f"{prefix}heads_att_trans.{h}.{layer_name}.bias"
+
+                    if w_key in state_dict:
+                        weight_list.append(state_dict[w_key])
+                        del state_dict[w_key]
+                    if b_key in state_dict:
+                        bias_list.append(state_dict[b_key])
+                        del state_dict[b_key]
+
+                if weight_list:
+                    new_w_key = f"{prefix}att_trans.{layer_name}.weight"
+                    state_dict[new_w_key] = torch.cat(weight_list, dim=0)
+                if bias_list:
+                    new_b_key = f"{prefix}att_trans.{layer_name}.bias"
+                    state_dict[new_b_key] = torch.cat(bias_list, dim=0)
+
+        super()._load_from_state_dict(state_dict, prefix, local_metadata, strict,
+                                      missing_keys, unexpected_keys, error_msgs)
 
     def forward(self, input):
         """
@@ -278,17 +307,20 @@ class MHASTP(torch.nn.Module):
                                   input.shape[3])
         assert len(input.shape) == 3
         bs, f_dim, t_dim = input.shape
-        chunks = torch.chunk(input, self.head_num, 1)
-        # split
-        chunks_out = []
-        for i, layer in enumerate(self.heads_att_trans):
-            att_score = layer(chunks[i])
-            alpha = F.softmax(att_score, dim=-1)
-            mean = torch.sum(alpha * chunks[i], dim=2)
-            var = torch.sum(alpha * chunks[i]**2, dim=2) - mean**2
-            std = torch.sqrt(var.clamp(min=1e-7))
-            chunks_out.append(torch.cat((mean, std), dim=1))
-        out = torch.cat(chunks_out, dim=1)
+        d_model = f_dim // self.head_num
+
+        att_score = self.att_trans(input)
+        alpha = F.softmax(att_score, dim=-1)
+
+        input_reshaped = input.reshape(bs, self.head_num, d_model, t_dim)
+        alpha_reshaped = alpha.reshape(bs, self.head_num, self.d_s, t_dim)
+
+        mean_reshaped = torch.sum(alpha_reshaped * input_reshaped, dim=3)
+        var_reshaped = torch.sum(alpha_reshaped * (input_reshaped ** 2), dim=3) - mean_reshaped ** 2
+        std_reshaped = torch.sqrt(var_reshaped.clamp(min=1e-7))
+
+        out = torch.cat((mean_reshaped, std_reshaped), dim=2)
+        out = out.view(bs, -1)
         return out
 
     def get_out_dim(self):
