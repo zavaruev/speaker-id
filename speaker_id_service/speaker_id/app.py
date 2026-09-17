@@ -339,7 +339,7 @@ async def identify(file: UploadFile = File(...)):
             matrix = _embedding_matrix
         
         if matrix is None:
-            _rebuild_cache()
+            await run_in_threadpool(_rebuild_cache)
             with _cache_lock:
                 names = _embedding_names
                 matrix = _embedding_matrix
