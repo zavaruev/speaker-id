@@ -4,11 +4,19 @@ from unittest.mock import patch, MagicMock
 
 # Mock the urllib and torch.load dependencies to prevent downloading the heavy model and loading it
 # These must be mocked BEFORE importing app
+mock_sha256 = MagicMock()
+mock_sha256.return_value.hexdigest.return_value = "07abeeb5150441995b51ea65c9ccc8feed78b33040012f1d2fad29a0e4f5b8d7"
+
+mock_open = MagicMock()
+mock_open.return_value.__enter__.return_value.read.side_effect = [b"", b""]
+
 with patch("urllib.request.urlretrieve", MagicMock()), \
      patch("torch.load", MagicMock(return_value={})), \
+     patch("builtins.open", mock_open), \
+     patch("hashlib.sha256", mock_sha256), \
      patch("campplus_model.CAMPPlus", MagicMock(return_value=MagicMock())):
 
-    from app import app, SPEAKERS_DIR
+    from app import app
 
 client = TestClient(app)
 
