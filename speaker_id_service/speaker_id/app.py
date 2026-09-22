@@ -334,7 +334,10 @@ def _rebuild_cache():
         _embedding_names = names
         _embedding_matrix = torch.stack(tensors) if tensors else None
 
+
 async def process_audio_file(file: UploadFile) -> tuple[torch.Tensor, list[str]]:
+    """Helper to process an uploaded audio file into an embedding.
+    Returns the normalized embedding and a list of temporary file paths created."""
     safe_filename = os.path.basename(file.filename) if file.filename else "upload.raw"
     if not safe_filename or safe_filename in (".", ".."):
         raise HTTPException(status_code=400, detail="Invalid filename")
@@ -343,6 +346,7 @@ async def process_audio_file(file: UploadFile) -> tuple[torch.Tensor, list[str]]
     with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp1, tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp2:
         temp_input = tmp1.name
         temp_wav = tmp2.name
+    
     temp_files = [temp_input, temp_wav]
 
     try:
@@ -363,6 +367,7 @@ async def process_audio_file(file: UploadFile) -> tuple[torch.Tensor, list[str]]
         signal, fs = await run_in_threadpool(torchaudio.load, temp_wav)
         if signal.numel() == 0 or signal.shape[-1] < 4000:
             raise HTTPException(status_code=400, detail="Audio too short or empty")
+
         peak = signal.abs().max()
         if peak > 0:
             signal = signal / peak * 0.9
@@ -371,10 +376,12 @@ async def process_audio_file(file: UploadFile) -> tuple[torch.Tensor, list[str]]
         embedding = F.normalize(embedding, p=2, dim=-1)
         return embedding, temp_files
     except Exception:
-        for tf in temp_files:
-            if os.path.exists(tf):
-                await run_in_threadpool(_safe_remove, tf)
+        # On error during processing, clean up temp files immediately
+        for temp_file in temp_files:
+            if os.path.exists(temp_file):
+                await run_in_threadpool(_safe_remove, temp_file)
         raise
+
 
 @app.post("/identify", response_model=IdentifyResponse)
 async def identify(file: UploadFile = File(...)):
@@ -387,8 +394,7 @@ async def identify(file: UploadFile = File(...)):
     """
     temp_files = []
     try:
-        embedding, t_files = await process_audio_file(file)
-        temp_files.extend(t_files)
+        embedding, temp_files = await process_audio_file(file)
 
         # Snapshot the gallery under the lock (matrix swap is atomic), then do
         # the heavy matmul outside it so enrollment is never blocked.
@@ -418,7 +424,8 @@ async def identify(file: UploadFile = File(...)):
         return IdentifyResponse(user_id=best_user, confidence=max_score)
         
     finally:
-        # Disk cleanup off the event loop; runs even when exceptions propagate.
+        # File removal happens on a thread pool so we don't stall the async
+        # event loop with slow unlink syscalls.
         for temp_file in temp_files:
             if os.path.exists(temp_file):
                 await run_in_threadpool(_safe_remove, temp_file)
