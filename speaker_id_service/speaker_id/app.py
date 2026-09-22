@@ -334,6 +334,28 @@ def _rebuild_cache():
         _embedding_names = names
         _embedding_matrix = torch.stack(tensors) if tensors else None
 
+def _run_inference(fbank: torch.Tensor) -> torch.Tensor:
+    """Run model inference synchronously."""
+    with torch.no_grad():
+        try:
+            # We must lock the entire forward pass if we want to ensure
+            # thread safety during a fallback, because another thread might
+            # be mid-fallback (model on CPU) while we try to infer on GPU.
+            with _inference_lock:
+                embedding = model(fbank)
+        except RuntimeError as e:
+            # GPU hiccup (OOM, driver reset): retry once on CPU, then put
+            # the model back so subsequent requests use the GPU again.
+            logger.warning(f"GPU inference failed, falling back to CPU: {e}")
+            with _inference_lock:
+                fbank_cpu = fbank.cpu()
+                model_cpu = model.cpu()
+                with torch.no_grad():
+                    embedding = model_cpu(fbank_cpu)
+                model.to(device)
+                embedding = embedding.to(device)
+        return embedding
+
 @app.post("/identify", response_model=IdentifyResponse)
 async def identify(file: UploadFile = File(...)):
     """Identify a speaker from a single uploaded audio file (no auth).
