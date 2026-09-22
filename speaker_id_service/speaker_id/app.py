@@ -490,8 +490,7 @@ async def identify(file: UploadFile = File(...)):
 async def enroll_form():
     """Serve the self-contained enrollment UI.
 
-    The page is a single inline HTML string (CSS + vanilla JS, no build step,
-    no static files) implementing an Apple-style design — DESIGN.md at the
+    The page is a static HTML file implementing an Apple-style design — DESIGN.md at the
     repo root is its spec. It records up to three samples via getUserMedia,
     encodes them to WAV client-side (encodeWAV) and POSTs them together with
     user_id and the API key to POST /enroll. Dark/light theme follows
