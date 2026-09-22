@@ -42,6 +42,7 @@ import numpy as np
 import torch.nn.functional as F
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Security, Request, Depends
+from contextlib import asynccontextmanager
 from fastapi.responses import HTMLResponse
 from fastapi.concurrency import run_in_threadpool
 from fastapi.security import APIKeyHeader
@@ -77,7 +78,13 @@ for _logger in ["httpx", "urllib3", "filelock"]:
     logging.getLogger(_logger).setLevel(logging.ERROR)
 logger = logging.getLogger(__name__)
 
-app = FastAPI()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await run_in_threadpool(_setup_model_and_warmup)
+    yield
+
+app = FastAPI(lifespan=lifespan)
 
 allowed_origins_str = os.environ.get("ALLOWED_ORIGINS", "http://localhost,http://localhost:8001")
 allowed_origins = [origin.strip() for origin in allowed_origins_str.split(",") if origin.strip()]
@@ -108,53 +115,55 @@ if device != "cpu":
     logger.info(f"GPU: {torch.cuda.get_device_name(0)}")
 
 # ---------------------------------------------------------------------------
-# Download the WeSpeaker CAMPPlus checkpoint on first start and verify its
-# integrity. The SHA-256 check only guards the download path — an existing
-# checkpoint is assumed intact (it was verified when it was downloaded).
-logger.info("Loading CAMPPlus model...")
+# Define model configuration globally
 model = CAMPPlus(feat_dim=80, embed_dim=512, pooling_func="TSTP")
-ckpt_path = MODELS_DIR / "campplus_avg_model.pt"
-if not ckpt_path.exists():
-    # First start: fetch the official VoxCeleb checkpoint (63 MB) from HF Hub.
-    import urllib.request
-    import urllib.parse
-    url = "https://huggingface.co/Wespeaker/wespeaker-voxceleb-campplus/resolve/main/avg_model.pt"
-    if urllib.parse.urlparse(url).scheme not in ("http", "https"):
-        raise ValueError(f"Refusing to download from untrusted scheme: {url}")
-    logger.info(f"Downloading CAM++ from {url}")
-    urllib.request.urlretrieve(url, str(ckpt_path))  # nosec B310
+_model_ready = False
 
-    expected_checksum = "07abeeb5150441995b51ea65c9ccc8feed78b33040012f1d2fad29a0e4f5b8d7"
-    sha256_hash = hashlib.sha256()
-    with open(ckpt_path, "rb") as f:
-        for byte_block in iter(lambda: f.read(4096), b""):
-            sha256_hash.update(byte_block)
+def _setup_model_and_warmup():
+    global _model_ready
+    logger.info("Loading CAMPPlus model...")
+    ckpt_path = MODELS_DIR / "campplus_avg_model.pt"
+    if not ckpt_path.exists():
+        # First start: fetch the official VoxCeleb checkpoint (63 MB) from HF Hub.
+        import urllib.request
+        import urllib.parse
+        url = "https://huggingface.co/Wespeaker/wespeaker-voxceleb-campplus/resolve/main/avg_model.pt"
+        if urllib.parse.urlparse(url).scheme not in ("http", "https"):
+            raise ValueError(f"Refusing to download from untrusted scheme: {url}")
+        logger.info(f"Downloading CAM++ from {url}")
+        urllib.request.urlretrieve(url, str(ckpt_path))  # nosec B310
 
-    if sha256_hash.hexdigest() != expected_checksum:
-        os.remove(ckpt_path)
-        logger.error("Model checksum verification failed.")
-        raise RuntimeError("Model checksum verification failed.")
+        expected_checksum = "07abeeb5150441995b51ea65c9ccc8feed78b33040012f1d2fad29a0e4f5b8d7"
+        sha256_hash = hashlib.sha256()
+        with open(ckpt_path, "rb") as f:
+            for byte_block in iter(lambda: f.read(4096), b""):
+                sha256_hash.update(byte_block)
 
-# Strip DataParallel's 'module.' prefix and drop the optional classification
-# projection head — we only need the embedding backbone.
-ckpt = torch.load(str(ckpt_path), map_location=device, weights_only=True)
-state_dict = {}
-for k, v in ckpt.items():
-    k = k.replace("module.", "")
-    if not k.startswith("projection"):
-        state_dict[k] = v
-model.load_state_dict(state_dict)
-model.to(device)
-model.eval()  # inference-only: disable dropout / BatchNorm running stats
-logger.info("CAMPPlus model successfully loaded!")
+        if sha256_hash.hexdigest() != expected_checksum:
+            os.remove(ckpt_path)
+            logger.error("Model checksum verification failed.")
+            raise RuntimeError("Model checksum verification failed.")
 
-# Warm-up: run dummy inference to compile CUDA kernels and allocate cuDNN
-# workspaces so the first real request does not pay the latency.
-with torch.no_grad():
-    dummy = torch.randn(1, 100, 80).to(device)
-    _ = model(dummy)
-logger.info("Model warm-up done")
-_model_ready = True  # flipped after warm-up; /health reports 503 until then
+    # Strip DataParallel's 'module.' prefix and drop the optional classification
+    # projection head — we only need the embedding backbone.
+    ckpt = torch.load(str(ckpt_path), map_location=device, weights_only=True)
+    state_dict = {}
+    for k, v in ckpt.items():
+        k = k.replace("module.", "")
+        if not k.startswith("projection"):
+            state_dict[k] = v
+    model.load_state_dict(state_dict)
+    model.to(device)
+    model.eval()  # inference-only: disable dropout / BatchNorm running stats
+    logger.info("CAMPPlus model successfully loaded!")
+
+    # Warm-up: run dummy inference to compile CUDA kernels and allocate cuDNN
+    # workspaces so the first real request does not pay the latency.
+    with torch.no_grad():
+        dummy = torch.randn(1, 100, 80).to(device)
+        _ = model(dummy)
+    logger.info("Model warm-up done")
+    _model_ready = True  # flipped after warm-up; /health reports 503 until then
 
 MAX_FILE_SIZE = 50 * 1024 * 1024  # per-file upload cap -> HTTP 413 above this
 MAX_FILES = 50                    # max audio samples accepted per enrollment
