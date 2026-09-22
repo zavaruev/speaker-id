@@ -58,7 +58,7 @@ echo ""
 FILES=()
 
 for ((i=1; i<=SAMPLES; i++)); do
-    FILE_PATH="/tmp/${USER_NAME}_enroll_${i}.wav"
+    FILE_PATH=$(mktemp "/tmp/${USER_NAME}_enroll_${i}_XXXXXX.wav")
     FILES+=("$FILE_PATH")
 
     echo "--- Sample $i of $SAMPLES ---"
