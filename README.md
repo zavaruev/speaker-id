@@ -123,6 +123,9 @@ No API key required for identification.
 Validation rules enforced server-side (HTTP 400 otherwise): `user_id` must match
 `^[a-zA-Z0-9_-]+$`; filenames are reduced to their basename; max **50 files** per enrollment;
 each file ≤ **50 MB** (HTTP 413); audio must be ≥ 4000 samples ≈ 0.25 s.
+`POST /identify` and `POST /enroll` are rate-limited to 10 requests/minute per client IP
+(HTTP 429 `Too Many Requests` above that); browsers behind the default CORS policy
+(`ALLOWED_ORIGINS`, default `http://localhost,http://localhost:8001`) are allowed.
 
 ---
 
@@ -166,9 +169,9 @@ Without normalization, similarity scores drop from 0.97 to ~0.26.
 ### Storage & concurrency
 
 - Enrolled voices live as `.npy` files in the bind-mounted `./speakers/` volume.
-- Writes are atomic (temp file inside the volume + `os.replace`); an in-memory matrix of all
-  embeddings is rebuilt after every enrollment so `/identify` does batched cosine similarity
-  in one matmul.
+- Writes are atomic (temp file inside the volume + `os.replace`); the in-memory matrix of all
+  embeddings is updated incrementally after every enrollment (full rescan only on cold start)
+  so `/identify` does batched cosine similarity in one matmul.
 
 ---
 
@@ -190,7 +193,7 @@ speaker-id/
     └── speaker_id/
         ├── Dockerfile              # python:3.11-slim + ffmpeg + torch cu118
         ├── requirements.txt        # fastapi, uvicorn, numpy, python-multipart, pydantic, soundfile
-        ├── app.py                  # FastAPI app: /identify, /enroll, inline browser UI
+        ├── app.py                  # FastAPI app: /identify, /enroll, enroll.html UI
         ├── campplus_model.py       # CAMPPlus architecture (from WeSpeaker, Apache-2.0)
         ├── pooling_layers.py       # TSTP/ASTP/ASP/MHASTP pooling layers (from WeSpeaker)
         ├── benchmark*.py           # Event-loop blocking vs threadpool micro-benchmarks
