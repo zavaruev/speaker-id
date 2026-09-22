@@ -547,7 +547,7 @@ def test_compute_fbank_16k(mock_fbank):
 
     # Assert kaldi fbank was called with 16000 fs and original signal
     mock_fbank.assert_called_once_with(
-        mock_signal, num_mel_bins=80, frame_length=25, frame_shift=10, dither=1.0, sample_frequency=16000
+        mock_signal, num_mel_bins=80, frame_length=25, frame_shift=10, dither=0.0, sample_frequency=16000
     )
 
     # Check tensor operations
@@ -611,7 +611,7 @@ def test_compute_fbank_not_16k(mock_resample_class, mock_fbank):
 
         # Verify kaldi fbank called with resampled signal and 16000 fs
         mock_fbank.assert_called_once_with(
-            mock_resampled_signal, num_mel_bins=80, frame_length=25, frame_shift=10, dither=1.0, sample_frequency=16000
+            mock_resampled_signal, num_mel_bins=80, frame_length=25, frame_shift=10, dither=0.0, sample_frequency=16000
         )
 
         assert result == mock_unsqueeze_tensor
@@ -633,7 +633,7 @@ def test_compute_fbank_not_16k(mock_resample_class, mock_fbank):
         mock_resample_class.assert_not_called()  # Resampler class shouldn't be instanciated again
         mock_resampler_instance_to.assert_called_once_with(mock_signal)
         mock_fbank.assert_called_once_with(
-            mock_resampled_signal, num_mel_bins=80, frame_length=25, frame_shift=10, dither=1.0, sample_frequency=16000
+            mock_resampled_signal, num_mel_bins=80, frame_length=25, frame_shift=10, dither=0.0, sample_frequency=16000
         )
 
         # Test re-initialization of resampler if fs changes
