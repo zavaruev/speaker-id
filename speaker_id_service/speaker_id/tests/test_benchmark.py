@@ -2,7 +2,7 @@ import os
 import io
 import tempfile
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 from fastapi import UploadFile
 from starlette.datastructures import Headers
 from benchmark import (
@@ -12,7 +12,6 @@ from benchmark import (
     measure_event_loop_lag,
     main,
 )
-from unittest.mock import patch
 
 def test_create_large_file():
     with tempfile.TemporaryDirectory() as tmpdir:

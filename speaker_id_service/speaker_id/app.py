@@ -394,7 +394,7 @@ async def process_audio_file(file: UploadFile) -> tuple[torch.Tensor, list[str]]
     with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp1, tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp2:
         temp_input = tmp1.name
         temp_wav = tmp2.name
-    
+
     temp_files = [temp_input, temp_wav]
 
     try:
@@ -449,7 +449,7 @@ async def identify(file: UploadFile = File(...)):
         with _cache_lock:
             names = _embedding_names
             matrix = _embedding_matrix
-        
+
         if matrix is None:
             async with _async_cache_lock:
                 # Double-check inside lock in case another request already rebuilt it
@@ -463,7 +463,7 @@ async def identify(file: UploadFile = File(...)):
                     with _cache_lock:
                         names = _embedding_names
                         matrix = _embedding_matrix
-        
+
         if matrix is not None:
             scores = (embedding.squeeze(0) @ matrix.T).cpu().numpy()
             max_idx = scores.argmax()
@@ -472,13 +472,13 @@ async def identify(file: UploadFile = File(...)):
         else:
             max_score = 0.0
             best_user = "unknown"
-        
+
         if max_score < 0.4:
             best_user = "unknown"  # below threshold we refuse to guess
-            
+
         logger.info(f"Identified: {best_user} (Confidence: {max_score:.2f})")
         return IdentifyResponse(user_id=best_user, confidence=max_score)
-        
+
     finally:
         # File removal happens on a thread pool so we don't stall the async
         # event loop with slow unlink syscalls.
@@ -519,10 +519,10 @@ async def enroll(user_id: str = Form(...), files: list[UploadFile] = File(...), 
         raise HTTPException(status_code=400, detail="At least one audio file is required")
     if len(files) > MAX_FILES:
         raise HTTPException(status_code=400, detail="Too many files uploaded")
-    
+
     embeddings_list = []
     temp_files = []
-    
+
     try:
         for file in files:
             embedding, t_files = await process_audio_file(file)
@@ -544,7 +544,7 @@ async def enroll(user_id: str = Form(...), files: list[UploadFile] = File(...), 
 
         logger.info(f"Voice enrolled: {user_id} ({len(files)} samples)")
         return EnrollResponse(status="success", user_id=user_id)
-        
+
     finally:
         # Remove every spill file created during this request (thread pool so
         # unlink syscalls never stall the event loop).
