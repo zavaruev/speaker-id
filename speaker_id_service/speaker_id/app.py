@@ -312,14 +312,8 @@ def _save_embedding_and_rebuild(tmp_save: str, avg_embeddings_numpy: np.ndarray,
             else:
                 _embedding_matrix = torch.cat([_embedding_matrix, t.unsqueeze(0)], dim=0)
 
-def _rebuild_cache():
-    """Rescan SPEAKERS_DIR and restack all embeddings into the global matrix.
-
-    Called at import time is NOT required — identify lazily triggers a rebuild
-    when the matrix is still empty. Corrupted .npy files are skipped with a
-    warning instead of failing enrollment/identification wholesale.
-    """
-    global _embedding_names, _embedding_matrix
+def _load_all_embeddings_sync():
+    """Synchronous core for loading all embeddings. Returns names, matrix."""
     names = []
     tensors = []
     for speaker_file in sorted(SPEAKERS_DIR.glob("*.npy")):
@@ -330,9 +324,21 @@ def _rebuild_cache():
             tensors.append(t)
         except (OSError, ValueError, RuntimeError) as e:
             logger.warning(f"Skipping corrupted {speaker_file.name}: {e}")
+    matrix = torch.stack(tensors) if tensors else None
+    return names, matrix
+
+async def _rebuild_cache():
+    """Rescan SPEAKERS_DIR and restack all embeddings into the global matrix.
+
+    Called at import time is NOT required — identify lazily triggers a rebuild
+    when the matrix is still empty. Corrupted .npy files are skipped with a
+    warning instead of failing enrollment/identification wholesale.
+    """
+    global _embedding_names, _embedding_matrix
+    names, matrix = await run_in_threadpool(_load_all_embeddings_sync)
     with _cache_lock:
         _embedding_names = names
-        _embedding_matrix = torch.stack(tensors) if tensors else None
+        _embedding_matrix = matrix
 
 
 async def process_audio_file(file: UploadFile) -> tuple[torch.Tensor, list[str]]:
@@ -403,7 +409,7 @@ async def identify(file: UploadFile = File(...)):
             matrix = _embedding_matrix
         
         if matrix is None:
-            await run_in_threadpool(_rebuild_cache)
+            await _rebuild_cache()
             with _cache_lock:
                 names = _embedding_names
                 matrix = _embedding_matrix
