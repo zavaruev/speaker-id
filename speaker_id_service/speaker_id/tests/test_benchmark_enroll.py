@@ -6,8 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from benchmark_enroll import (
-    save_embedding_blocking,
-    save_embedding_nonblocking,
+    save_embedding,
     simulate_enroll_blocking,
     simulate_enroll_nonblocking,
     measure_event_loop_lag,
@@ -19,7 +18,7 @@ def test_save_embedding_blocking():
         with patch("benchmark_enroll.SPEAKERS_DIR", Path(tmpdir)):
             avg_embeddings_numpy = np.random.rand(10, 10)
             user_id = "test_user_blocking"
-            save_embedding_blocking(avg_embeddings_numpy, user_id)
+            save_embedding(avg_embeddings_numpy, user_id)
 
             file_path = os.path.join(tmpdir, f"{user_id}.npy")
             assert os.path.exists(file_path)
@@ -33,7 +32,7 @@ def test_save_embedding_nonblocking():
         with patch("benchmark_enroll.SPEAKERS_DIR", Path(tmpdir)):
             avg_embeddings_numpy = np.random.rand(10, 10)
             user_id = "test_user_nonblocking"
-            save_embedding_nonblocking(avg_embeddings_numpy, user_id)
+            save_embedding(avg_embeddings_numpy, user_id)
 
             file_path = os.path.join(tmpdir, f"{user_id}.npy")
             assert os.path.exists(file_path)

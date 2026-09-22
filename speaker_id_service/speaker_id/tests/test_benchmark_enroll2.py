@@ -7,7 +7,7 @@ from unittest.mock import patch
 import numpy as np
 import pytest
 
-from benchmark_enroll2 import (
+from benchmark_enroll import (
     mock_rebuild_cache,
     save_embedding,
     simulate_enroll_blocking,
@@ -22,7 +22,7 @@ def test_mock_rebuild_cache():
 def test_save_embedding():
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp_path = Path(tmpdir)
-        with patch("benchmark_enroll2.SPEAKERS_DIR", tmp_path):
+        with patch("benchmark_enroll.SPEAKERS_DIR", tmp_path):
             embedding = np.random.rand(512)
             user_id = "test_user_123"
 
@@ -38,7 +38,7 @@ def test_save_embedding():
 async def test_simulate_enroll_blocking():
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp_path = Path(tmpdir)
-        with patch("benchmark_enroll2.SPEAKERS_DIR", tmp_path):
+        with patch("benchmark_enroll.SPEAKERS_DIR", tmp_path):
             duration = await simulate_enroll_blocking(3)
             assert duration >= 0.0
 
@@ -50,7 +50,7 @@ async def test_simulate_enroll_blocking():
 async def test_simulate_enroll_nonblocking():
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp_path = Path(tmpdir)
-        with patch("benchmark_enroll2.SPEAKERS_DIR", tmp_path):
+        with patch("benchmark_enroll.SPEAKERS_DIR", tmp_path):
             duration = await simulate_enroll_nonblocking(3)
             assert duration >= 0.0
 
@@ -62,7 +62,7 @@ async def test_simulate_enroll_nonblocking():
 async def test_measure_event_loop_lag():
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp_path = Path(tmpdir)
-        with patch("benchmark_enroll2.SPEAKERS_DIR", tmp_path):
+        with patch("benchmark_enroll.SPEAKERS_DIR", tmp_path):
             duration, max_delay = await measure_event_loop_lag(
                 simulate_enroll_nonblocking, 2
             )
