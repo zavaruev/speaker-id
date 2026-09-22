@@ -168,6 +168,9 @@ _cache_lock = threading.Lock()
 # Inference lock to prevent concurrent CPU fallbacks from moving the model
 # while other threads are using it on the GPU.
 _model_lock = threading.Lock()
+# Async lock against cache stampedes: concurrent /identify requests hitting an
+# empty gallery rebuild the matrix only once (double-checked locking below).
+_async_cache_lock = asyncio.Lock()
 # Pre-created no-op resampler (16k->16k); compute_fbank swaps it lazily only
 # when a non-16kHz signal shows up, avoiding per-request transform init.
 _resampler_16k = torchaudio.transforms.Resample(orig_freq=16000, new_freq=16000).to(device)
@@ -409,10 +412,18 @@ async def identify(file: UploadFile = File(...)):
             matrix = _embedding_matrix
         
         if matrix is None:
-            await _rebuild_cache()
-            with _cache_lock:
-                names = _embedding_names
-                matrix = _embedding_matrix
+            async with _async_cache_lock:
+                # Double-check inside lock in case another request already rebuilt it
+                with _cache_lock:
+                    if _embedding_matrix is not None:
+                        matrix = _embedding_matrix
+                        names = _embedding_names
+
+                if matrix is None:
+                    await _rebuild_cache()
+                    with _cache_lock:
+                        names = _embedding_names
+                        matrix = _embedding_matrix
         
         if matrix is not None:
             scores = (embedding.squeeze(0) @ matrix.T).cpu().numpy()

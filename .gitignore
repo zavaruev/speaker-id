@@ -5,3 +5,5 @@ speaker_id_service/models/
 speaker_id_service/speakers/
 venv/
 .pytest_cache
+speakers/
+models/
