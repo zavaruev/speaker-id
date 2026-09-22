@@ -365,7 +365,7 @@ def test_rebuild_cache_partial_failure(mock_stack, mock_normalize, mock_tensor, 
     mock_glob.return_value = [mock_file_corrupt, mock_file_valid]
 
     # First call raises exception, second succeeds
-    mock_load.side_effect = [Exception("Corrupted file"), "mock_np_array"]
+    mock_load.side_effect = [ValueError("Corrupted file"), "mock_np_array"]
 
     mock_tensor_obj = MagicMock()
     mock_tensor.return_value = mock_tensor_obj
@@ -652,7 +652,7 @@ def test_safe_remove_file_not_found(mock_remove):
 def test_safe_remove_exception(mock_logger_warning, mock_remove):
     """Test that other exceptions are caught and logged."""
     error_msg = "Permission denied"
-    mock_remove.side_effect = Exception(error_msg)
+    mock_remove.side_effect = OSError(error_msg)
 
     app._safe_remove("test_path.txt")
 
