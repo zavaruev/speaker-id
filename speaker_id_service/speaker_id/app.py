@@ -43,7 +43,7 @@ import torch.nn.functional as F
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Security, Request, Depends
 from contextlib import asynccontextmanager
-from fastapi.responses import HTMLResponse, FileResponse
+from fastapi.responses import FileResponse
 from fastapi.concurrency import run_in_threadpool
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel
