@@ -2,6 +2,7 @@ import os
 import io
 import tempfile
 import pytest
+from unittest.mock import patch, MagicMock
 from fastapi import UploadFile
 from starlette.datastructures import Headers
 from benchmark import (
@@ -73,3 +74,20 @@ async def test_main(capsys):
 
         # Verify cleanup
         mock_remove.assert_called_once_with("dummy_audio.wav")
+@patch("benchmark.create_large_file")
+@patch("benchmark.measure_event_loop_lag", return_value=(0.1, 0.01))
+async def test_main_creates_and_cleans_dummy_file(mock_measure, mock_create):
+    # Mock create_large_file to avoid I/O but satisfy `main` creating it
+    def fake_create(path, size_mb):
+        with open(path, "wb") as f:
+            f.write(b"dummy data")
+
+    mock_create.side_effect = fake_create
+
+    from benchmark import main
+    await main()
+
+    mock_create.assert_called_once_with("dummy_audio.wav", size_mb=20)
+    assert mock_measure.call_count == 3
+    # assert the dummy file created by main via our fake_create was cleaned up properly
+    assert not os.path.exists("dummy_audio.wav")
