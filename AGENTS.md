@@ -5,7 +5,7 @@ Docker Compose project hosting a FastAPI speaker-identification service (WeSpeak
 ## Layout
 
 - `speaker_id_service/` — the service: `docker-compose.yaml`, `enroll_client.sh`, plus the app in `speaker_id/` (FastAPI `app.py`, CAMPPlus model code, Dockerfile). **Read `speaker_id_service/AGENTS.md` — it has the full architecture, API table, and audio pipeline; this file only covers what it omits.**
-- `DESIGN.md` — Apple design-system spec for the `/enroll` UI. That UI is an inline HTML string inside `speaker_id/app.py` (lines ~207–917); UI changes happen there, not in a template dir.
+- `DESIGN.md` — Apple design-system spec for the `/enroll` UI. That UI lives in `speaker_id_service/speaker_id/enroll.html`, served by `enroll_form()` in `speaker_id/app.py` via `FileResponse`; UI changes happen in the HTML file.
 - `setup_speaker_id.sh` — legacy installer (README: "kept for reference"). Do not use; it generates an outdated speechbrain-based app.
 
 ## Run
