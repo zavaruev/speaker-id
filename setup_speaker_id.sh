@@ -127,7 +127,7 @@ async def identify(file: UploadFile = File(...)):
         best_user = "unknown"
         
         for speaker_file in SPEAKERS_DIR.glob("*.npy"):
-            enrolled_embedding = torch.tensor(np.load(speaker_file)).to(device)
+            enrolled_embedding = torch.tensor(np.load(speaker_file, allow_pickle=False)).to(device)
             # Сравнение через косинусное сходство
             score = F.cosine_similarity(embeddings.squeeze(), enrolled_embedding.squeeze(), dim=0).item()
             if score > max_score:

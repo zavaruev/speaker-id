@@ -259,7 +259,7 @@ def _rebuild_cache():
     tensors = []
     for speaker_file in sorted(SPEAKERS_DIR.glob("*.npy")):
         try:
-            t = torch.tensor(np.load(speaker_file), device=device)
+            t = torch.tensor(np.load(speaker_file, allow_pickle=False), device=device)
             t = F.normalize(t, p=2, dim=-1)
             names.append(speaker_file.stem)
             tensors.append(t)
