@@ -38,6 +38,7 @@ import torchaudio
 import torchaudio.compliance.kaldi as kaldi
 import numpy as np
 import torch.nn.functional as F
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Security
 from fastapi.responses import HTMLResponse
 from fastapi.concurrency import run_in_threadpool
@@ -75,6 +76,18 @@ for _logger in ["httpx", "urllib3", "filelock"]:
 logger = logging.getLogger(__name__)
 
 app = FastAPI()
+
+allowed_origins_str = os.environ.get("ALLOWED_ORIGINS", "http://localhost,http://localhost:8001")
+allowed_origins = [origin.strip() for origin in allowed_origins_str.split(",") if origin.strip()]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=allowed_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 
 # Bind-mounted volumes (see docker-compose.yaml). Both are created on the host
 # side by compose; mkdir here also supports bare `python3 app.py` runs.

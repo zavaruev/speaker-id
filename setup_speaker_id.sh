@@ -31,6 +31,7 @@ import torch
 import torchaudio
 import numpy as np
 import torch.nn.functional as F
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Security
 from fastapi.concurrency import run_in_threadpool
 from fastapi.security import APIKeyHeader
@@ -55,6 +56,18 @@ def _safe_remove(path: str):
         logger.warning(f"Failed to remove {path}: {e}")
 
 app = FastAPI()
+
+allowed_origins_str = os.environ.get("ALLOWED_ORIGINS", "http://localhost,http://localhost:8001")
+allowed_origins = [origin.strip() for origin in allowed_origins_str.split(",") if origin.strip()]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=allowed_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 
 MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB limit
 
