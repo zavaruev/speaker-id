@@ -334,52 +334,18 @@ def _rebuild_cache():
         _embedding_names = names
         _embedding_matrix = torch.stack(tensors) if tensors else None
 
-def _run_inference(fbank: torch.Tensor) -> torch.Tensor:
-    """Run model inference synchronously."""
-    with torch.no_grad():
-        try:
-            # We must lock the entire forward pass if we want to ensure
-            # thread safety during a fallback, because another thread might
-            # be mid-fallback (model on CPU) while we try to infer on GPU.
-            with _inference_lock:
-                embedding = model(fbank)
-        except RuntimeError as e:
-            # GPU hiccup (OOM, driver reset): retry once on CPU, then put
-            # the model back so subsequent requests use the GPU again.
-            logger.warning(f"GPU inference failed, falling back to CPU: {e}")
-            with _inference_lock:
-                fbank_cpu = fbank.cpu()
-                model_cpu = model.cpu()
-                with torch.no_grad():
-                    embedding = model_cpu(fbank_cpu)
-                model.to(device)
-                embedding = embedding.to(device)
-        return embedding
-
-@app.post("/identify", response_model=IdentifyResponse)
-async def identify(file: UploadFile = File(...)):
-    """Identify a speaker from a single uploaded audio file (no auth).
-
-    Pipeline: stream to disk (enforcing the size cap) -> FFmpeg to 16 kHz mono
-    WAV -> fbank features -> CAMPPlus embedding -> batched cosine similarity
-    against every enrolled speaker -> best match above 0.4, else 'unknown'.
-    Temp files are always removed in the finally block, even on errors.
-    """
-    # Never trust client-supplied paths: keep only the basename so crafted
-    # names like '../../etc/passwd' cannot influence where bytes are written.
+async def process_audio_file(file: UploadFile) -> tuple[torch.Tensor, list[str]]:
     safe_filename = os.path.basename(file.filename) if file.filename else "upload.raw"
     if not safe_filename or safe_filename in (".", ".."):
         raise HTTPException(status_code=400, detail="Invalid filename")
 
     ext = os.path.splitext(safe_filename)[1] or ".raw"
-    # Pre-create both spill files up front: raw upload + converted WAV.
     with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp1, tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp2:
         temp_input = tmp1.name
         temp_wav = tmp2.name
-    
+    temp_files = [temp_input, temp_wav]
+
     try:
-        # Stream the upload in 1 MB chunks instead of buffering it in RAM,
-        # aborting with 413 as soon as the cumulative size exceeds the cap.
         file_size = 0
         async with await anyio.open_file(temp_input, "wb") as buffer:
             while True:
@@ -395,17 +361,34 @@ async def identify(file: UploadFile = File(...)):
             raise HTTPException(status_code=500, detail="Audio conversion failed")
 
         signal, fs = await run_in_threadpool(torchaudio.load, temp_wav)
-        # ~0.25 s minimum: shorter clips produce unstable embeddings.
         if signal.numel() == 0 or signal.shape[-1] < 4000:
             raise HTTPException(status_code=400, detail="Audio too short or empty")
-        # Peak-normalize to 0.9: phone Opus recordings are much quieter than
-        # desktop WAVs, and unnormalized level differences crush similarity.
         peak = signal.abs().max()
         if peak > 0:
             signal = signal / peak * 0.9
         fbank = compute_fbank(signal.to(device), fs)
         embedding = await run_in_threadpool(_model_inference, fbank)
-        embedding = F.normalize(embedding, p=2, dim=-1)  # cosine == dot product now
+        embedding = F.normalize(embedding, p=2, dim=-1)
+        return embedding, temp_files
+    except Exception:
+        for tf in temp_files:
+            if os.path.exists(tf):
+                await run_in_threadpool(_safe_remove, tf)
+        raise
+
+@app.post("/identify", response_model=IdentifyResponse)
+async def identify(file: UploadFile = File(...)):
+    """Identify a speaker from a single uploaded audio file (no auth).
+
+    Pipeline: stream to disk (enforcing the size cap) -> FFmpeg to 16 kHz mono
+    WAV -> fbank features -> CAMPPlus embedding -> batched cosine similarity
+    against every enrolled speaker -> best match above 0.4, else 'unknown'.
+    Temp files are always removed in the finally block, even on errors.
+    """
+    temp_files = []
+    try:
+        embedding, t_files = await process_audio_file(file)
+        temp_files.extend(t_files)
 
         # Snapshot the gallery under the lock (matrix swap is atomic), then do
         # the heavy matmul outside it so enrollment is never blocked.
@@ -436,10 +419,9 @@ async def identify(file: UploadFile = File(...)):
         
     finally:
         # Disk cleanup off the event loop; runs even when exceptions propagate.
-        if os.path.exists(temp_input):
-            await run_in_threadpool(_safe_remove, temp_input)
-        if os.path.exists(temp_wav):
-            await run_in_threadpool(_safe_remove, temp_wav)
+        for temp_file in temp_files:
+            if os.path.exists(temp_file):
+                await run_in_threadpool(_safe_remove, temp_file)
 
 @app.get("/enroll", response_class=HTMLResponse)
 async def enroll_form():
@@ -1204,43 +1186,8 @@ async def enroll(user_id: str = Form(...), files: list[UploadFile] = File(...), 
     
     try:
         for file in files:
-            safe_filename = os.path.basename(file.filename) if file.filename else "upload.raw"
-            if not safe_filename or safe_filename in (".", ".."):
-                raise HTTPException(status_code=400, detail="Invalid filename")
-
-            ext = os.path.splitext(safe_filename)[1] or ".raw"
-            # Pair of spill files per upload: raw bytes + converted WAV.
-            with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp1, tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp2:
-                temp_input = tmp1.name
-                temp_wav = tmp2.name
-            temp_files.extend([temp_input, temp_wav])
-            
-            file_size = 0
-            # Same chunked streaming + size cap as /identify.
-            async with await anyio.open_file(temp_input, "wb") as buffer:
-                while True:
-                    chunk = await file.read(1024 * 1024)
-                    if not chunk:
-                        break
-                    file_size += len(chunk)
-                    if file_size > MAX_FILE_SIZE:
-                        raise HTTPException(status_code=413, detail=f"File exceeds {MAX_FILE_SIZE // (1024*1024)}MB limit")
-                    await buffer.write(chunk)
-
-            if not await convert_to_wav(temp_input, temp_wav):
-                raise HTTPException(status_code=500, detail="Audio conversion failed")
-
-            signal, fs = await run_in_threadpool(torchaudio.load, temp_wav)
-            if signal.numel() == 0 or signal.shape[-1] < 4000:
-                raise HTTPException(status_code=400, detail="Audio too short or empty")
-            # Peak normalization identical to /identify so enroll and identify
-            # embeddings live in the same feature distribution.
-            peak = signal.abs().max()
-            if peak > 0:
-                signal = signal / peak * 0.9
-            fbank = compute_fbank(signal.to(device), fs)
-            embedding = await run_in_threadpool(_model_inference, fbank)
-            embedding = F.normalize(embedding, p=2, dim=-1)
+            embedding, t_files = await process_audio_file(file)
+            temp_files.extend(t_files)
             embeddings_list.append(embedding.squeeze().cpu())
 
         # Average all samples into one centroid embedding, re-normalize so it
