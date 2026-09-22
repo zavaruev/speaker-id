@@ -10,6 +10,12 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 class MockTorch(MagicMock):
     pass
 
+_mocked_modules = ['torch', 'torch.nn', 'torch.nn.functional', 'torchaudio',
+                   'torchaudio.compliance', 'torchaudio.compliance.kaldi', 'campplus_model']
+# Save current entries first: if real torch is already imported (non-default
+# test order), a blind pop() below would delete it and break later imports.
+_saved_modules = {m: sys.modules.get(m) for m in _mocked_modules}
+
 sys.modules['torch'] = MockTorch()
 sys.modules['torch.nn'] = MagicMock()
 sys.modules['torch.nn.functional'] = MagicMock()
@@ -39,11 +45,14 @@ torch.cuda.is_available.return_value = False
 
 import app
 
-# Restore real modules once app is imported, so that subsequent tests
+# Restore pre-import entries once app is imported, so that subsequent tests
 # (model/pooling layers) run against the actual torch/torchaudio.
-for _mod in ('torch', 'torch.nn', 'torch.nn.functional', 'torchaudio',
-             'torchaudio.compliance', 'torchaudio.compliance.kaldi', 'campplus_model'):
-    sys.modules.pop(_mod, None)
+for _mod in _mocked_modules:
+    _saved = _saved_modules[_mod]
+    if _saved is None:
+        sys.modules.pop(_mod, None)
+    else:
+        sys.modules[_mod] = _saved
 urllib.request.urlretrieve = _orig_urlretrieve
 hashlib.sha256 = _orig_hashlib
 builtins.open = _orig_open
