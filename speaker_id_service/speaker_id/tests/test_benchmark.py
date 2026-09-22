@@ -76,6 +76,7 @@ async def test_main(capsys):
         mock_remove.assert_called_once_with("dummy_audio.wav")
 @patch("benchmark.create_large_file")
 @patch("benchmark.measure_event_loop_lag", return_value=(0.1, 0.01))
+@pytest.mark.asyncio
 async def test_main_creates_and_cleans_dummy_file(mock_measure, mock_create):
     # Mock create_large_file to avoid I/O but satisfy `main` creating it
     def fake_create(path, size_mb):

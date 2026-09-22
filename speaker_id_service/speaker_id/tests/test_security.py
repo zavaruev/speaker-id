@@ -2,22 +2,6 @@ import io
 from fastapi.testclient import TestClient
 from unittest.mock import patch, MagicMock
 
-import sys
-class MockTorch(MagicMock):
-    pass
-
-sys.modules['torch'] = MockTorch()
-sys.modules['torch.nn'] = MagicMock()
-sys.modules['torch.nn.functional'] = MagicMock()
-sys.modules['torchaudio'] = MagicMock()
-sys.modules['torchaudio.compliance'] = MagicMock()
-sys.modules['torchaudio.compliance.kaldi'] = MagicMock()
-
-import torch
-torch.load = MagicMock(return_value={})
-torch.cuda = MagicMock()
-torch.cuda.is_available.return_value = False
-
 
 # Mock the urllib and torch.load dependencies to prevent downloading the heavy model and loading it
 # These must be mocked BEFORE importing app

@@ -455,6 +455,10 @@ def test_identify_gpu_fallback(mock_logger, mock_normalize, mock_fbank, mock_rem
         async def mock_run_in_threadpool(func, *args, **kwargs):
             if func == app.torchaudio.load:
                 return mock_load.return_value
+            if func is getattr(app, "_model_inference", None):
+                # Exercise the real inference helper (with mocked model) so
+                # the GPU->CPU fallback path is actually covered.
+                return func(*args, **kwargs)
             return None
 
         mock_threadpool.side_effect = mock_run_in_threadpool
@@ -523,7 +527,7 @@ def test_enroll_gpu_fallback(mock_save_embedding, mock_logger, mock_normalize, m
         mock_fbank_tensor.cpu.assert_called_once()
         mock_cpu_model.assert_called_once_with(mock_fbank_tensor_cpu)
         mock_model.to.assert_called_with(app.device)
-        mock_logger.warning.assert_called_with("GPU inference failed in enroll, falling back to CPU: OOM")
+        mock_logger.warning.assert_called_with("GPU inference failed, falling back to CPU: OOM")
 
 
 @patch("app.kaldi.fbank")
