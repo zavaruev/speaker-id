@@ -179,7 +179,7 @@ def test_identify_convert_failure(mock_remove, mock_convert, mock_open):
     )
 
     assert response.status_code == 500
-    assert response.json()["detail"] == "Failed to process audio format"
+    assert response.json()["detail"] == "Audio conversion failed"
 
 @patch("builtins.open", new_callable=MagicMock)
 @patch("app.convert_to_wav", new_callable=AsyncMock, return_value=False)
@@ -194,7 +194,7 @@ def test_enroll_convert_failure(mock_remove, mock_convert, mock_open):
     )
 
     assert response.status_code == 500
-    assert response.json()["detail"] == "Failed to process audio format"
+    assert response.json()["detail"] == "Audio conversion failed"
 
 @patch("builtins.open", new_callable=MagicMock)
 @patch("app.convert_to_wav", new_callable=AsyncMock, return_value=True)
