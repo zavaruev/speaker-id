@@ -275,3 +275,21 @@ docker compose exec speaker_id bash
 | `POST /enroll` returns 401 | Missing or wrong `X-API-Key` header; browser UI asks for the key, `enroll_client.sh` reads `SPEAKER_ID_API_KEY` |
 | Container restart-loops, no GPU in logs | `nvidia-container-toolkit` missing or drivers not CUDA 11.8-compatible; service still works on CPU (slow) via the automatic CPU fallback |
 | `Audio too short or empty` | Recording under 0.25 s or a corrupted upload |
+
+---
+
+## License
+
+Dual-licensed — pick one:
+
+| | License | Price | Applies when |
+|---|---|---|---|
+| **A** | **[GNU AGPL v3 or later](LICENSE)** | free | you accept copyleft: derivative works and network services must stay open source |
+| **B** | **[Commercial License](COMMERCIAL-LICENSE.md)** | **paid** | you want it in a **commercial product** — bundled with hardware, shipped closed-source, offered as SaaS, or licensed away from the AGPL |
+
+```
+SPDX-License-Identifier: AGPL-3.0-or-later
+Commercial licensing: alexander.zavaruev@gmail.com
+```
+
+Third-party components keep their own licenses — see [`NOTICE`](NOTICE).

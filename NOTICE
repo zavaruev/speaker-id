@@ -1,0 +1,31 @@
+speaker-id
+Copyright (c) 2026 Alexander Zavaruev
+
+This repository is dual-licensed under the GNU AGPL v3 or later and a paid
+Commercial License (see LICENSE and COMMERCIAL-LICENSE.md).
+
+THIRD-PARTY COMPONENTS
+======================
+
+The following are NOT covered by the above license and stay under their own
+terms:
+
+1. speaker_id_service/speaker_id/campplus_model.py
+   CAM++ model definition
+   Copyright (c) 2023 Hongji Wang (jijijiang77@gmail.com)
+               2024 Zhengyang Chen (chenzhengyang117@gmail.com)
+   License:    Apache License 2.0
+   Source:     https://github.com/alibaba-damo-academy/3D-Speaker
+
+2. speaker_id_service/speaker_id/pooling_layers.py
+   Copyright (c) 2021 Shuai Wang (wsstriving@gmail.com)
+   License:    Apache License 2.0
+   Source:     https://github.com/wenet-e2e/wespeaker
+
+3. Model weights (downloaded at first run, not committed)
+   https://huggingface.co/Wespeaker/wespeaker-voxceleb-campplus
+   License:    Apache License 2.0 - check the model card for updates.
+
+4. Python dependencies (requirements.txt) keep their own licenses.
+
+Apache License 2.0: https://www.apache.org/licenses/LICENSE-2.0
