@@ -719,3 +719,131 @@ async def test_cors_preflight_headers_allowed_origin():
         response = await client.options("/identify", headers=headers)
         assert response.status_code == 400 # Starlette CORS returns 400 for OPTIONS if origin is invalid
         assert "access-control-allow-origin" not in response.headers
+
+
+@patch("app.os.replace")
+@patch("app.np.save")
+@patch("app.F.normalize")
+@patch("app.torch.tensor")
+def test_save_embedding_and_rebuild_new_user_empty_matrix(mock_tensor, mock_normalize, mock_np_save, mock_os_replace):
+    """Test saving an embedding for a new user when matrix is initially None"""
+    tmp_save = "tmp_path"
+    avg_embeddings_numpy = MagicMock()
+    final_path = "final_path"
+    user_id = "user1"
+
+    mock_t = MagicMock()
+    mock_tensor.return_value = mock_t
+
+    mock_norm_t = MagicMock()
+    mock_normalize.return_value = mock_norm_t
+
+    mock_unsqueezed = MagicMock()
+    mock_norm_t.unsqueeze.return_value = mock_unsqueezed
+
+    # Save old state
+    old_names = app._embedding_names
+    old_matrix = app._embedding_matrix
+
+    try:
+        app._embedding_names = []
+        app._embedding_matrix = None
+
+        app._save_embedding_and_rebuild(tmp_save, avg_embeddings_numpy, final_path, user_id)
+
+        mock_np_save.assert_called_once_with(tmp_save, avg_embeddings_numpy)
+        mock_os_replace.assert_called_once_with(tmp_save + ".npy", final_path)
+        mock_tensor.assert_called_once_with(avg_embeddings_numpy, device=app.device)
+        mock_normalize.assert_called_once_with(mock_t, p=2, dim=-1)
+
+        assert app._embedding_names == ["user1"]
+        assert app._embedding_matrix == mock_unsqueezed
+        mock_norm_t.unsqueeze.assert_called_once_with(0)
+    finally:
+        # Restore old state
+        app._embedding_names = old_names
+        app._embedding_matrix = old_matrix
+
+
+@patch("app.torch.cat")
+@patch("app.os.replace")
+@patch("app.np.save")
+@patch("app.F.normalize")
+@patch("app.torch.tensor")
+def test_save_embedding_and_rebuild_new_user_existing_matrix(mock_tensor, mock_normalize, mock_np_save, mock_os_replace, mock_cat):
+    """Test saving an embedding for a new user when matrix already has entries"""
+    tmp_save = "tmp_path"
+    avg_embeddings_numpy = MagicMock()
+    final_path = "final_path"
+    user_id = "user2"
+
+    mock_t = MagicMock()
+    mock_tensor.return_value = mock_t
+
+    mock_norm_t = MagicMock()
+    mock_normalize.return_value = mock_norm_t
+
+    mock_unsqueezed = MagicMock()
+    mock_norm_t.unsqueeze.return_value = mock_unsqueezed
+
+    old_names = app._embedding_names
+    old_matrix = app._embedding_matrix
+
+    try:
+        app._embedding_names = ["user1"]
+        mock_existing_matrix = MagicMock()
+        app._embedding_matrix = mock_existing_matrix
+
+        mock_catted_matrix = MagicMock()
+        mock_cat.return_value = mock_catted_matrix
+
+        app._save_embedding_and_rebuild(tmp_save, avg_embeddings_numpy, final_path, user_id)
+
+        assert app._embedding_names == ["user1", "user2"]
+        assert app._embedding_matrix == mock_catted_matrix
+        mock_cat.assert_called_once_with([mock_existing_matrix, mock_unsqueezed], dim=0)
+    finally:
+        app._embedding_names = old_names
+        app._embedding_matrix = old_matrix
+
+
+@patch("app.os.replace")
+@patch("app.np.save")
+@patch("app.F.normalize")
+@patch("app.torch.tensor")
+def test_save_embedding_and_rebuild_existing_user(mock_tensor, mock_normalize, mock_np_save, mock_os_replace):
+    """Test saving an embedding for an existing user (update existing matrix)"""
+    tmp_save = "tmp_path"
+    avg_embeddings_numpy = MagicMock()
+    final_path = "final_path"
+    user_id = "user1"
+
+    mock_t = MagicMock()
+    mock_tensor.return_value = mock_t
+
+    mock_norm_t = MagicMock()
+    mock_normalize.return_value = mock_norm_t
+
+    old_names = app._embedding_names
+    old_matrix = app._embedding_matrix
+
+    try:
+        app._embedding_names = ["user1", "user2"]
+
+        mock_existing_matrix = MagicMock()
+        mock_cloned_matrix = MagicMock()
+        mock_existing_matrix.clone.return_value = mock_cloned_matrix
+
+        app._embedding_matrix = mock_existing_matrix
+
+        app._save_embedding_and_rebuild(tmp_save, avg_embeddings_numpy, final_path, user_id)
+
+        assert app._embedding_names == ["user1", "user2"]
+        mock_existing_matrix.clone.assert_called_once()
+
+        mock_cloned_matrix.__setitem__.assert_called_once_with(0, mock_norm_t)
+
+        assert app._embedding_matrix == mock_cloned_matrix
+    finally:
+        app._embedding_names = old_names
+        app._embedding_matrix = old_matrix
