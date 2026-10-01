@@ -719,3 +719,95 @@ async def test_cors_preflight_headers_allowed_origin():
         response = await client.options("/identify", headers=headers)
         assert response.status_code == 400 # Starlette CORS returns 400 for OPTIONS if origin is invalid
         assert "access-control-allow-origin" not in response.headers
+
+@pytest.mark.asyncio
+@pytest.mark.asyncio
+@patch("app.run_in_threadpool", new_callable=AsyncMock)
+async def test_lifespan(mock_run_in_threadpool):
+    """Test the lifespan context manager properly sets up model"""
+    async with app.lifespan(app.app):
+        # We expect run_in_threadpool to be called with _setup_model_and_warmup
+        mock_run_in_threadpool.assert_called_once_with(app._setup_model_and_warmup)
+
+def test_setup_model_and_warmup_success():
+    """Test _setup_model_and_warmup functionality on successful load"""
+    with patch("pathlib.Path.exists", return_value=True) as mock_exists, \
+         patch("app.torch.load") as mock_load, \
+         patch("app.model") as mock_model, \
+         patch("app.logger") as mock_logger, \
+         patch("app.torch.no_grad"):
+
+        # Mock pathlib object for checkpoint
+         # File exists, no download
+
+
+        # Mock torch.load returning dummy weights
+        mock_load.return_value = {
+            "module.layer1.weight": "dummy",
+            "projection.weight": "dummy2"
+        }
+
+        # Run setup
+        app._setup_model_and_warmup()
+
+        # Check weights filtering logic
+        # (Should remove 'module.' prefix and ignore 'projection')
+        mock_model.load_state_dict.assert_called_once_with({"layer1.weight": "dummy"})
+        mock_model.to.assert_called_once_with(app.device)
+        mock_model.eval.assert_called_once()
+
+        # Check warmup inference
+        # In actual code: dummy_input = torch.randn(2, 80, 200).to(device)
+        # model(dummy_input)
+        mock_model.assert_called_once()
+
+def test_setup_model_and_warmup_download():
+    """Test _setup_model_and_warmup downloading when ckpt doesn't exist"""
+    with patch("pathlib.Path.exists", return_value=False) as mock_exists, \
+         patch("urllib.request.urlretrieve") as mock_urlretrieve, \
+         patch("hashlib.sha256") as mock_sha256, \
+         patch("builtins.open") as mock_open, \
+         patch("app.os.remove") as mock_remove, \
+         patch("app.torch.load") as mock_load, \
+         patch("app.model") as mock_model:
+
+        # Checkpoint doesn't exist
+
+
+
+        # Mock sha256 to match expected
+        mock_hasher = MagicMock()
+        mock_hasher.hexdigest.return_value = "07abeeb5150441995b51ea65c9ccc8feed78b33040012f1d2fad29a0e4f5b8d7"
+        mock_sha256.return_value = mock_hasher
+
+        # Mock open returning an empty generator to stop iteration
+        mock_open.return_value.__enter__.return_value.read.side_effect = [b"dummy", b""]
+
+        # Run setup
+        app._setup_model_and_warmup()
+
+        # Check download was triggered
+        url = "https://huggingface.co/Wespeaker/wespeaker-voxceleb-campplus/resolve/main/avg_model.pt"
+        mock_urlretrieve.assert_called_once_with(url, str(app.MODELS_DIR / "campplus_avg_model.pt"))
+
+def test_setup_model_and_warmup_checksum_failure():
+    """Test _setup_model_and_warmup raising error on checksum mismatch"""
+    with patch("pathlib.Path.exists", return_value=False) as mock_exists, \
+         patch("urllib.request.urlretrieve"), \
+         patch("hashlib.sha256") as mock_sha256, \
+         patch("builtins.open") as mock_open, \
+         patch("app.os.remove") as mock_remove:
+
+
+
+        # Return invalid checksum
+        mock_hasher = MagicMock()
+        mock_hasher.hexdigest.return_value = "invalid_hash"
+        mock_sha256.return_value = mock_hasher
+
+        mock_open.return_value.__enter__.return_value.read.side_effect = [b""]
+
+        with pytest.raises(RuntimeError, match="Model checksum verification failed."):
+            app._setup_model_and_warmup()
+
+        mock_remove.assert_called_once_with(app.MODELS_DIR / "campplus_avg_model.pt")
