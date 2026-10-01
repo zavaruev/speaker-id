@@ -125,13 +125,15 @@ def _setup_model_and_warmup():
     ckpt_path = MODELS_DIR / "campplus_avg_model.pt"
     if not ckpt_path.exists():
         # First start: fetch the official VoxCeleb checkpoint (63 MB) from HF Hub.
-        import urllib.request
-        import urllib.parse
+        import requests
         url = "https://huggingface.co/Wespeaker/wespeaker-voxceleb-campplus/resolve/main/avg_model.pt"
-        if urllib.parse.urlparse(url).scheme not in ("http", "https"):
-            raise ValueError(f"Refusing to download from untrusted scheme: {url}")
         logger.info(f"Downloading CAM++ from {url}")
-        urllib.request.urlretrieve(url, str(ckpt_path))  # nosec B310
+
+        response = requests.get(url, stream=True, timeout=30.0)
+        response.raise_for_status()
+        with open(ckpt_path, "wb") as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                f.write(chunk)
 
         expected_checksum = "07abeeb5150441995b51ea65c9ccc8feed78b33040012f1d2fad29a0e4f5b8d7"
         sha256_hash = hashlib.sha256()

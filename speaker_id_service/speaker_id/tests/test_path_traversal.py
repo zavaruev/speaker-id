@@ -2,12 +2,12 @@ import os
 import unittest
 from unittest.mock import patch, MagicMock, AsyncMock
 
-# Create a dummy model directory to avoid urllib downloads during module import
+# Create a dummy model directory to avoid requests downloads during module import
 os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
 os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
 
-# Mock the entire urllib and torch to prevent any downloads or heavy initializations during import
-with patch("urllib.request.urlretrieve", return_value=None), \
+# Mock requests and torch to prevent any downloads or heavy initializations during import
+with patch("requests.get", return_value=MagicMock()), \
      patch("torch.load", return_value={}), \
      patch("torch.cuda.is_available", return_value=False), \
      patch("campplus_model.CAMPPlus.load_state_dict", MagicMock()):

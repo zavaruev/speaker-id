@@ -24,9 +24,9 @@ sys.modules['torchaudio.compliance'] = MagicMock()
 sys.modules['torchaudio.compliance.kaldi'] = MagicMock()
 sys.modules['campplus_model'] = MagicMock()
 
-import urllib.request
-_orig_urlretrieve = urllib.request.urlretrieve
-urllib.request.urlretrieve = MagicMock()
+import requests
+_orig_requests_get = requests.get
+requests.get = MagicMock()
 import hashlib
 _orig_hashlib = hashlib.sha256
 _mock_sha256 = MagicMock()
@@ -53,7 +53,7 @@ for _mod in _mocked_modules:
         sys.modules.pop(_mod, None)
     else:
         sys.modules[_mod] = _saved
-urllib.request.urlretrieve = _orig_urlretrieve
+requests.get = _orig_requests_get
 hashlib.sha256 = _orig_hashlib
 builtins.open = _orig_open
 
