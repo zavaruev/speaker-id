@@ -403,10 +403,7 @@ class MQMHASTP(torch.nn.Module):
                                   input.shape[1] * input.shape[2],
                                   input.shape[3])
         assert len(input.shape) == 3
-        res = []
-        for i, layer in enumerate(self.n_query):
-            res.append(layer(input))
-        out = torch.cat(res, dim=-1)
+        out = torch.cat([layer(input) for layer in self.n_query], dim=-1)
         return out
 
     def get_out_dim(self):
