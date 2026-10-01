@@ -83,6 +83,23 @@ def test_rate_limiting():
         files=[("file", ("test.wav", io.BytesIO(file_content), "audio/wav"))]
     )
     assert response.status_code == 429
+
+    # Test X-Real-IP header
+    app._rate_limits.clear()
+    for _ in range(app.RATE_LIMIT_MAX_REQUESTS):
+        response = client.post(
+            "/identify",
+            headers={"X-Real-IP": "10.0.0.50"},
+            files=[("file", ("test.wav", io.BytesIO(file_content), "audio/wav"))]
+        )
+        assert response.status_code != 429
+
+    response = client.post(
+        "/identify",
+        headers={"X-Real-IP": "10.0.0.50"},
+        files=[("file", ("test.wav", io.BytesIO(file_content), "audio/wav"))]
+    )
+    assert response.status_code == 429
     assert "Too Many Requests" in response.json()["detail"]
 
     # Test proxy header
