@@ -412,6 +412,34 @@ async def test_rebuild_cache_partial_failure(mock_stack, mock_normalize, mock_te
     assert mock_normalize.call_count == 1
     mock_stack.assert_called_once_with([mock_norm_obj])
 
+@patch("app.logger.warning")
+@patch("app.np.load")
+@patch("app.Path.glob")
+def test_load_all_embeddings_sync_error_handling(mock_glob, mock_load, mock_logger_warning):
+    """Test error handling in _load_all_embeddings_sync skips corrupted files."""
+    class MockPath:
+        def __init__(self, name):
+            self.name = name
+            self.stem = name.split(".")[0]
+        def __lt__(self, other):
+            return self.name < other.name
+
+    mock_file = MockPath("corrupt_user.npy")
+    mock_glob.return_value = [mock_file]
+
+    # Mock load to raise one of the caught exceptions
+    mock_load.side_effect = OSError("Mocked OS Error")
+
+    names, matrix = app._load_all_embeddings_sync()
+
+    # The file should be skipped, so names should be empty and matrix None
+    assert names == []
+    assert matrix is None
+
+    # Verify logger.warning was called with expected message
+    mock_logger_warning.assert_called_once()
+    assert "Skipping corrupted corrupt_user.npy: Mocked OS Error" in mock_logger_warning.call_args[0][0]
+
 @patch("app.MAX_FILE_SIZE", 1024)
 def test_identify_file_size_limit():
     """Test that uploading a file larger than MAX_FILE_SIZE returns 413"""
