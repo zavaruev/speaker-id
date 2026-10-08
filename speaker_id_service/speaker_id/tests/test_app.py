@@ -972,3 +972,38 @@ def test_setup_model_and_warmup_checksum_failure():
             app._setup_model_and_warmup()
 
         mock_remove.assert_called_once_with(app.MODELS_DIR / "campplus_avg_model.pt")
+
+@patch("app.logger")
+def test_model_inference_gpu_fallback(mock_logger):
+    # torch is mocked globally in test_app.py
+    mock_fbank = MagicMock()
+    mock_fbank_cpu = MagicMock()
+    mock_fbank.cpu.return_value = mock_fbank_cpu
+
+    mock_model = MagicMock()
+    mock_model.side_effect = RuntimeError("OOM")
+
+    mock_cpu_model = MagicMock()
+    mock_cpu_embedding = MagicMock()
+    mock_cpu_model.return_value = mock_cpu_embedding
+    mock_model.cpu.return_value = mock_cpu_model
+
+    mock_final_embedding = MagicMock()
+    mock_cpu_embedding.to.return_value = mock_final_embedding
+
+    # Mock `next(model.parameters()).device` to trigger model.to(device)
+    mock_param = MagicMock()
+    mock_param.device = "cpu"
+    mock_model.parameters.return_value = iter([mock_param])
+
+    with patch("app.model", mock_model), \
+         patch("app.device", "cuda:0"):
+
+        result = app._model_inference(mock_fbank)
+
+        assert result == mock_final_embedding
+        mock_logger.warning.assert_called_with("GPU inference failed, falling back to CPU: OOM")
+        mock_fbank.cpu.assert_called_once()
+        mock_model.cpu.assert_called_once()
+        mock_cpu_model.assert_called_once_with(mock_fbank_cpu)
+        mock_cpu_embedding.to.assert_called_once_with("cuda:0")
