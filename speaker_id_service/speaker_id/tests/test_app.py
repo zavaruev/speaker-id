@@ -742,6 +742,17 @@ async def test_cors_preflight_headers_allowed_origin():
         assert response.status_code == 200
         assert response.headers.get("access-control-allow-origin") == "http://localhost:8001"
 
+        allow_methods = response.headers.get("access-control-allow-methods", "")
+        allow_headers = response.headers.get("access-control-allow-headers", "")
+        assert "GET" in allow_methods
+        assert "POST" in allow_methods
+        assert "OPTIONS" in allow_methods
+        assert "PUT" not in allow_methods
+        assert "Content-Type" in allow_headers
+        assert "X-API-Key" in allow_headers
+        assert "*" not in allow_methods
+        assert "*" not in allow_headers
+
         # Test an invalid origin - it should not get the allow-origin header back
         headers["Origin"] = "http://malicious-site.com"
         response = await client.options("/identify", headers=headers)
