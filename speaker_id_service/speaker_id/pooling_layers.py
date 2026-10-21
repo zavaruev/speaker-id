@@ -437,44 +437,57 @@ class XI(torch.nn.Module):
                               stride=1, bias=True)
         self.softplus2 = torch.nn.Softplus(beta=1, threshold=20)
 
+    def _validate_inputs(self, inputs: torch.Tensor) -> None:
+        """Validates the shape and dimensions of the input tensor."""
+        assert len(inputs.shape) == 3, f"Expected 3D tensor, got {len(inputs.shape)}D"
+        assert inputs.shape[1] == self.input_dim, f"Expected dim 1 to be {self.input_dim}, got {inputs.shape[1]}"
+
+    def _estimate_log_precision(self, feat: torch.Tensor) -> torch.Tensor:
+        """Estimates and clamps the log precision for the given features."""
+        # frame precision estimate
+        logprec = self.softplus2(self.lin2(self.lin1_relu_bn(feat)))
+        # Square and take log before softmax
+        logprec = 2.0 * torch.log(logprec)
+        return logprec.clamp(min=-15.0, max=15.0)
+
+    def _compute_attention_weights(self, logprec: torch.Tensor) -> torch.Tensor:
+        """Computes softmax attention weights combining logprec and prior_logprec."""
+        prior_expanded = self.prior_logprec.repeat(logprec.shape[0], 1).unsqueeze(dim=2)
+        combined_prec = torch.cat((logprec, prior_expanded), 2)
+        return self.softmax(combined_prec)
+
+    def _compute_posterior_mean(self, feat: torch.Tensor, weight_attn: torch.Tensor) -> torch.Tensor:
+        """Computes the posterior mean (phi)."""
+        prior_mean_expanded = self.prior_mean.repeat(feat.shape[0], 1).unsqueeze(dim=2)
+        combined_feat = torch.cat((feat, prior_mean_expanded), 2)
+        return torch.sum(combined_feat * weight_attn, dim=2)
+
+    def _compute_standard_deviation(self, feat: torch.Tensor, weight_attn: torch.Tensor, phi: torch.Tensor) -> torch.Tensor:
+        """Computes the standard deviation (sigma)."""
+        prior_mean_expanded = self.prior_mean.repeat(feat.shape[0], 1).unsqueeze(dim=2)
+        combined_feat = torch.cat((feat, prior_mean_expanded), 2)
+        sigma2 = torch.sum(combined_feat.pow(2) * weight_attn, dim=2)
+        return torch.sqrt(torch.clamp(sigma2 - phi ** 2, min=1.0e-12))
+
     def forward(self, inputs):
         """
         @inputs: a 3-dimensional tensor (a batch),
         including [samples-index, frames-dim-index, frames-index]
         """
-        assert len(inputs.shape) == 3
-        assert inputs.shape[1] == self.input_dim
+        self._validate_inputs(inputs)
         feat = inputs
-        # Log-precision estimator
-        # frame precision estimate
-        logprec = self.softplus2(self.lin2(self.lin1_relu_bn(feat)))
 
-        # Square and take log before softmax
-        logprec = 2.0 * torch.log(logprec)
-        CLAMP_MIN = -15.0
-        CLAMP_MAX = 15.0
-        logprec = logprec.clamp(min=CLAMP_MIN, max=CLAMP_MAX)
+        # Log-precision estimator
+        logprec = self._estimate_log_precision(feat)
+
         # Gaussian Posterior Inference
-        # Option 1: a_o (prior_mean-phi) included in variance
-        weight_attn = self.softmax(
-            torch.cat(
-                (logprec,
-                 self.prior_logprec.repeat(
-                     logprec.shape[0], 1).unsqueeze(dim=2)), 2))
-        # Posterior precision
-        Ls = torch.sum(torch.exp(torch.cat(
-            (logprec, self.prior_logprec.repeat(
-                logprec.shape[0], 1).unsqueeze(dim=2)), 2)), dim=2)
+        weight_attn = self._compute_attention_weights(logprec)
+
         # Posterior mean
-        phi = torch.sum(torch.cat(
-            (feat, self.prior_mean.repeat(
-                feat.shape[0], 1).unsqueeze(dim=2)), 2) * weight_attn, dim=2)
+        phi = self._compute_posterior_mean(feat, weight_attn)
 
         if self.stddev:
-            sigma2 = torch.sum(torch.cat((
-                feat, self.prior_mean.repeat(
-                    feat.shape[0], 1).unsqueeze(dim=2)), 2).pow(2) * weight_attn, dim=2)
-            sigma = torch.sqrt(torch.clamp(sigma2 - phi ** 2, min=1.0e-12))
+            sigma = self._compute_standard_deviation(feat, weight_attn, phi)
             return torch.cat((phi, sigma), dim=1).unsqueeze(dim=2)
         else:
             return phi
