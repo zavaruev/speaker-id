@@ -972,3 +972,22 @@ def test_setup_model_and_warmup_checksum_failure():
             app._setup_model_and_warmup()
 
         mock_remove.assert_called_once_with(app.MODELS_DIR / "campplus_avg_model.pt")
+
+def test_safe_remove_success():
+    """Test _safe_remove correctly removes a file without errors."""
+    with patch("app.os.remove") as mock_remove:
+        app._safe_remove("/fake/path")
+        mock_remove.assert_called_once_with("/fake/path")
+
+def test_safe_remove_file_not_found():
+    """Test _safe_remove handles FileNotFoundError silently."""
+    with patch("app.os.remove", side_effect=FileNotFoundError):
+        app._safe_remove("/fake/path")
+
+def test_safe_remove_os_error():
+    """Test _safe_remove logs a warning and doesn't raise on OSError."""
+    with patch("app.os.remove", side_effect=OSError("Permission denied")):
+        with patch("app.logger.warning") as mock_warning:
+            app._safe_remove("/fake/path")
+            mock_warning.assert_called_once()
+            assert "Failed to remove /fake/path" in mock_warning.call_args[0][0]
