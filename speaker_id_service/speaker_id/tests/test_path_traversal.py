@@ -25,7 +25,7 @@ class TestSpeakerID(unittest.TestCase):
             with patch("shutil.copyfileobj", MagicMock()):
                 with patch("app.convert_to_wav", new_callable=AsyncMock, return_value=False):
                     with patch("torch.load", return_value={}):
-                        response = client.post(
+                        client.post(
                             "/identify",
                             files={"file": ("../../../etc/passwd", b"dummy audio content", "audio/wav")}
                         )
@@ -44,7 +44,7 @@ class TestSpeakerID(unittest.TestCase):
             with patch("shutil.copyfileobj", MagicMock()):
                 with patch("app.convert_to_wav", new_callable=AsyncMock, return_value=False):
                     with patch("torch.load", return_value={}):
-                        response = client.post(
+                        client.post(
                             "/enroll",
                             headers={"X-API-Key": "default_secret_key"},
                             data={"user_id": "test_user"},
