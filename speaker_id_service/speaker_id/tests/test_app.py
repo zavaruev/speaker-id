@@ -671,6 +671,7 @@ def test_compute_fbank_not_16k(mock_resample_class, mock_fbank):
 
         result2 = app.compute_fbank(mock_signal, 8000)
 
+        assert result2 == mock_unsqueeze_tensor
         mock_resample_class.assert_not_called()  # Resampler class shouldn't be instanciated again
         mock_resampler_instance_to.assert_called_once_with(mock_signal)
         mock_fbank.assert_called_once_with(
@@ -682,6 +683,8 @@ def test_compute_fbank_not_16k(mock_resample_class, mock_fbank):
         mock_resample_class.return_value = mock_resampler_instance
 
         result3 = app.compute_fbank(mock_signal, 24000)
+
+        assert result3 == mock_unsqueeze_tensor
         mock_resample_class.assert_called_once_with(24000, 16000)
 
     finally:
