@@ -42,6 +42,37 @@ fi
 LOWER_NAME="${RAW_NAME,,}"
 USER_NAME="${LOWER_NAME^}"
 
+# Resolve and validate the API key up front so we fail before making the user record again.
+API_KEY="${SPEAKER_ID_API_KEY:-}"
+while true; do
+    if [ -z "$API_KEY" ]; then
+        read -s -p "API Key (X-API-Key): " API_KEY; echo ""
+        if [ -z "$API_KEY" ]; then
+            echo "Error: API key is required for enrollment."
+            continue
+        fi
+    fi
+
+    # Test the API key against the server.
+    # Without files, it should return 422 if auth passes, or 401/403 if auth fails.
+    CURL_CONFIG_TEST=$(mktemp)
+    chmod 600 "$CURL_CONFIG_TEST"
+    echo "header = \"X-API-Key: ${API_KEY}\"" > "$CURL_CONFIG_TEST"
+
+    HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$SERVER_URL" -K "$CURL_CONFIG_TEST")
+    rm -f "$CURL_CONFIG_TEST"
+
+    if [ "$HTTP_STATUS" = "401" ] || [ "$HTTP_STATUS" = "403" ]; then
+        echo "Error: Invalid API key. Server returned HTTP $HTTP_STATUS."
+        API_KEY="" # Prompt again
+    elif [ "$HTTP_STATUS" = "000" ]; then
+        echo "Error: Could not connect to server at $SERVER_URL."
+        exit 1
+    else
+        break
+    fi
+done
+
 # Fixed prompts read aloud during recording; varied content/intonation gives
 # the averaged embedding better coverage than repeating one sentence.
 TEXTS=(
@@ -78,17 +109,6 @@ for ((i=1; i<=SAMPLES; i++)); do
     echo "Sample $i recorded"
     echo ""
 done
-
-# Resolve the API key up front so we fail before making the user record again:
-# env var wins; otherwise ask quietly (no echo to screen/history).
-API_KEY="${SPEAKER_ID_API_KEY:-}"
-if [ -z "$API_KEY" ]; then
-    read -s -p "API Key (X-API-Key): " API_KEY; echo ""
-    if [ -z "$API_KEY" ]; then
-        echo "Error: API key is required for enrollment."
-        exit 1
-    fi
-fi
 
 echo "Sending $SAMPLES samples for user '$USER_NAME' to server..."
 
