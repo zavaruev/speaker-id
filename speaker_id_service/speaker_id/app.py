@@ -428,8 +428,7 @@ async def process_audio_file(file: UploadFile) -> tuple[torch.Tensor, list[str]]
     except Exception:
         # On error during processing, clean up temp files immediately
         for temp_file in temp_files:
-            if os.path.exists(temp_file):
-                await run_in_threadpool(_safe_remove, temp_file)
+            await run_in_threadpool(_safe_remove, temp_file)
         raise
 
 
@@ -485,8 +484,7 @@ async def identify(file: UploadFile = File(...)):
         # File removal happens on a thread pool so we don't stall the async
         # event loop with slow unlink syscalls.
         for temp_file in temp_files:
-            if os.path.exists(temp_file):
-                await run_in_threadpool(_safe_remove, temp_file)
+            await run_in_threadpool(_safe_remove, temp_file)
 
 @app.get("/enroll", response_class=FileResponse)
 async def enroll_form():
@@ -551,8 +549,7 @@ async def enroll(user_id: str = Form(...), files: list[UploadFile] = File(...), 
         # Remove every spill file created during this request (thread pool so
         # unlink syscalls never stall the event loop).
         for temp_file in temp_files:
-            if os.path.exists(temp_file):
-                await run_in_threadpool(_safe_remove, temp_file)
+            await run_in_threadpool(_safe_remove, temp_file)
 
 @app.get("/health")
 async def health():
