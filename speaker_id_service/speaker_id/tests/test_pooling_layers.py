@@ -161,9 +161,6 @@ def test_tstp_forward_values():
     in_dim = 2
     model = TSTP(in_dim=in_dim)
 
-    batch_size = 1
-    time_steps = 4
-
     # Create a specific input tensor to manually verify the values
     # Tensor shape: (1, 2, 4)
     dummy_input = torch.tensor([[[1.0, 2.0, 3.0, 4.0],
