@@ -338,3 +338,53 @@ def test_cam_layer_seg_pooling():
 
     with pytest.raises(ValueError):
         layer.seg_pooling(x, stype='invalid')
+
+def test_cam_dense_tdnn_block_initialization():
+    from campplus_model import CAMDenseTDNNBlock
+    num_layers = 3
+    in_channels = 16
+    out_channels = 32
+    bn_channels = 16
+    kernel_size = 3
+
+    block = CAMDenseTDNNBlock(
+        num_layers=num_layers,
+        in_channels=in_channels,
+        out_channels=out_channels,
+        bn_channels=bn_channels,
+        kernel_size=kernel_size
+    )
+
+    assert len(block) == num_layers
+    for i in range(num_layers):
+        layer = getattr(block, f'tdnnd{i + 1}')
+        assert layer.linear1.in_channels == in_channels + i * out_channels
+        assert layer.cam_layer.linear_local.out_channels == out_channels
+        assert getattr(block, f'tdnnd{i + 1}') is layer
+
+def test_cam_dense_tdnn_block_forward():
+    from campplus_model import CAMDenseTDNNBlock
+    import torch
+    num_layers = 3
+    in_channels = 16
+    out_channels = 32
+    bn_channels = 16
+    kernel_size = 3
+
+    block = CAMDenseTDNNBlock(
+        num_layers=num_layers,
+        in_channels=in_channels,
+        out_channels=out_channels,
+        bn_channels=bn_channels,
+        kernel_size=kernel_size
+    )
+    block.eval()
+
+    batch_size = 2
+    time_steps = 50
+    x = torch.randn(batch_size, in_channels, time_steps)
+    out = block(x)
+
+    # Output channels grow by out_channels per layer
+    expected_out_channels = in_channels + num_layers * out_channels
+    assert out.shape == (batch_size, expected_out_channels, time_steps)
