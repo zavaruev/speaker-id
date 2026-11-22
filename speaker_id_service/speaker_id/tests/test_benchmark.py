@@ -95,7 +95,6 @@ async def test_main_creates_and_cleans_dummy_file(mock_measure, mock_create):
 import time
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from pooling_layers import MHASTP as MHASTP_New, MHASTPConfig
 
 class MHASTP_Old(torch.nn.Module):
@@ -128,7 +127,7 @@ class MHASTP_Old(torch.nn.Module):
         chunks_out = []
         for i, layer in enumerate(self.heads_att_trans):
             att_score = layer(chunks[i])
-            alpha = F.softmax(att_score, dim=-1)
+            alpha = torch.softmax(att_score, dim=-1)
             mean = torch.sum(alpha * chunks[i], dim=2)
             var = torch.sum(alpha * chunks[i]**2, dim=2) - mean**2
             std = torch.sqrt(var.clamp(min=1e-7))
