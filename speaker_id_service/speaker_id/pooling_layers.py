@@ -21,7 +21,6 @@ even though we remove the mean statistic, on Voxceleb.
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from dataclasses import dataclass
 
 
@@ -148,7 +147,7 @@ class ASTP(nn.Module):
         # DON'T use ReLU here! ReLU would zero out half the bottleneck and
         # empirically hurts convergence; tanh keeps signed information.
         alpha = torch.tanh(
-            self.linear1(x_in))  # alpha = F.relu(self.linear1(x_in))
+            self.linear1(x_in))  # alpha = torch.relu(self.linear1(x_in))
         # Softmax over TIME: alpha now sums to 1 across frames per channel.
         alpha = torch.softmax(self.linear2(alpha), dim=2)
         # Weighted mean and E[x^2]-mean^2 trick for the weighted std.
@@ -330,7 +329,7 @@ class MHASTP(torch.nn.Module):
         d_model = f_dim // self.head_num
 
         att_score = self.att_trans(input)
-        alpha = F.softmax(att_score, dim=-1)
+        alpha = torch.softmax(att_score, dim=-1)
 
         input_reshaped = input.reshape(bs, self.head_num, d_model, t_dim)
         alpha_reshaped = alpha.reshape(bs, self.head_num, self.d_s, t_dim)
