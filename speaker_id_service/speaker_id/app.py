@@ -407,7 +407,9 @@ async def process_audio_file(file: UploadFile) -> tuple[torch.Tensor, list[str]]
     if not safe_filename or safe_filename in (".", ".."):
         raise HTTPException(status_code=400, detail="Invalid filename")
 
-    ext = os.path.splitext(safe_filename)[1] or ".raw"
+    ext = os.path.splitext(safe_filename)[1]
+    if not ext or not re.match(r'^\.[a-zA-Z0-9]+$', ext):
+        ext = ".raw"
     with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp1, tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp2:
         temp_input = tmp1.name
         temp_wav = tmp2.name
